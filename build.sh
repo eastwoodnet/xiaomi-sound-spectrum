@@ -10,6 +10,15 @@ set -e
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${SRC_DIR}/led_music.c"
 OUT="${SRC_DIR}/led_music"
+EXTRA_FLAGS=()
+case "${1:-l06a}" in
+    l06a) ;;
+    oh2p)
+        OUT="${SRC_DIR}/led_music_oh2p"
+        EXTRA_FLAGS+=(-DDEVICE_OH2P)
+        ;;
+    *) echo "Usage: $0 [l06a|oh2p]" >&2; exit 2 ;;
+esac
 
 echo "[*] 开始交叉编译 aarch64 原生二进制: ${OUT} ..."
 
@@ -20,6 +29,7 @@ clang -target aarch64-linux-gnu \
       -fno-stack-protector \
       -fno-builtin \
       -O3 \
+      "${EXTRA_FLAGS[@]}" \
       "${SRC}" -o "${OUT}"
 
 if command -v llvm-strip >/dev/null 2>&1; then

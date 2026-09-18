@@ -1,5 +1,8 @@
 # 小米 Sound (L06A) 原生 ALSA 数字回环 + 1024 点定点 FFT 音乐律动系统 (v1.0-beta)
 
+> **OH2P 1.62.2**：使用 `python3 deploy-oh2p.py <音箱IP>` 安装，见 [OH2P 部署与运行说明](docs/oh2p.md)。
+> 下文的 `deploy.py` 和默认构建对应 L06A。
+
 本项目专为**小米小爱音箱（型号：L06A / Xiaomi Sound）**打造，利用其顶部的 18 颗全彩环形 RGB LED，全面接入 TI TAS5805M 功放芯片的 **ALSA 48kHz 硬件数字回环（Loopback `hw:0,2`）**，结合原生自研 **1024 点定点 (Q14) Radix-2 FFT 频谱分析引擎**，实现媲美 **Apple HomePod** 与 **JBL Pulse** 的专业级无损声学流光音乐律动。
 
 ---

@@ -22,6 +22,10 @@ typedef unsigned short uint16_t;
 typedef unsigned char uint8_t;
 typedef unsigned long uint64_t;
 
+#ifdef DEVICE_OH2P
+#include "oh2p_output.h"
+#endif
+
 /* ---------------- Linux aarch64 直通系统调用定义 ---------------- */
 #define SYS_dup3          24
 #define SYS_openat        56
@@ -158,6 +162,25 @@ static inline long sys_execve(const char *path, char *const argv[], char *const 
     return (long)x0;
 }
 
+#ifdef DEVICE_OH2P
+/* Keep the capture child scoped to this visualizer, including parent crashes.
+ * Linux aarch64: prctl=167, getppid=173, PR_SET_PDEATHSIG=1, SIGTERM=15.
+ */
+static void oh2p_capture_parent_guard(void) {
+    register long x8 __asm__("x8") = 167;
+    register long x0 __asm__("x0") = 1;
+    register long x1 __asm__("x1") = 15;
+    register long x2 __asm__("x2") = 0;
+    register long x3 __asm__("x3") = 0;
+    register long x4 __asm__("x4") = 0;
+    __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2), "r"(x3), "r"(x4) : "memory");
+    if (x0 < 0) sys_exit(1);
+    x8 = 173;
+    __asm__ __volatile__("svc #0" : "=r"(x0) : "r"(x8) : "memory");
+    if (x0 == 1) sys_exit(1); /* parent died before prctl */
+}
+#endif
+
 /* 基础内存操作 */
 void *memcpy(void *dest, const void *src, size_t n) {
     char *d = (char *)dest;
@@ -185,10 +208,18 @@ static inline uint32_t int_sqrt(uint64_t val) {
 }
 
 /* ---------------- 硬件路径定义 ---------------- */
+#ifdef DEVICE_OH2P
+static const char PATH_LED_RGB[]    = "/sys/devices/i2c-2/2-0034/led_rgb";
+#else
 static const char PATH_LED_RGB[]    = "/sys/devices/i2c-0/0-003a/led_rgb";
 static const char PATH_LED_FADE[]   = "/sys/devices/i2c-0/0-003a/led_fade";
+#endif
 static const char PATH_MUTE[]       = "/tmp/mipns/mute";
+#ifdef DEVICE_OH2P
+static const char PATH_MODE_LOG[]   = "/tmp/visualizer_mode_oh2p";
+#else
 static const char PATH_MODE_LOG[]   = "/tmp/visualizer_mode";
+#endif
 
 /* ================================================================
  * 1024 点定点 FFT (Q14) 旋转因子与汉宁窗查表
@@ -506,6 +537,16 @@ static inline int fmt_led_cmd(char *buf, int idx, uint32_t color) {
 
 static inline void flush_leds(int fd_led, int force) {
     char buf[32];
+#ifdef DEVICE_OH2P
+    for (int i = 0; i < OH2P_LED_COUNT; i++) {
+        uint32_t color = oh2p_pixel(current_colors, i);
+        if (force || color_diff(color, last_colors[i]) >= 2) {
+            int len = fmt_led_cmd(buf, i, color);
+            if (sys_write(fd_led, buf, len) != len) sys_exit(1);
+            last_colors[i] = color;
+        }
+    }
+#else
     for (int i = 0; i < 18; i++) {
         if (force || color_diff(current_colors[i], last_colors[i]) >= 6) {
             int len = fmt_led_cmd(buf, i, current_colors[i]);
@@ -513,6 +554,7 @@ static inline void flush_leds(int fd_led, int force) {
             last_colors[i] = current_colors[i];
         }
     }
+#endif
 }
 
 static inline void set_all_leds(uint32_t color) {
@@ -549,15 +591,20 @@ static int spawn_arecord(void) {
 
     if (pid == 0) {
         /* 子进程 arecord 执行体 */
+#ifdef DEVICE_OH2P
+        oh2p_capture_parent_guard();
+#endif
         sys_close(pfd[0]);
         sys_dup3(pfd[1], 1, 0); /* stdout -> pipe */
         sys_close(pfd[1]);
 
+#ifndef DEVICE_OH2P
         int devnull = sys_openat(AT_FDCWD, "/dev/null", O_WRONLY, 0);
         if (devnull >= 0) {
             sys_dup3(devnull, 2, 0); /* stderr -> /dev/null */
             sys_close(devnull);
         }
+#endif
 
         char *const argv[] = {
             "/usr/bin/arecord",
@@ -598,6 +645,22 @@ void main_loop(long argc, char **argv) {
     int current_mode = 1;
     int auto_cycle = 1;
 
+#ifdef DEVICE_OH2P
+    /* The OH2P wrapper validates mode. Optional brightness: integer 1..100. */
+    if (argc > 3) sys_exit(2);
+    if (argc == 3) {
+        int value = 0;
+        const char *p = argv[2];
+        if (!*p) sys_exit(2);
+        while (*p) {
+            if (*p < '0' || *p > '9' || value > 100) sys_exit(2);
+            value = value * 10 + *p++ - '0';
+        }
+        if (value < 1 || value > 100) sys_exit(2);
+        oh2p_brightness = value;
+    }
+#endif
+
     if (argc >= 2 && argv[1]) {
         if (argv[1][0] == '1') { current_mode = 1; auto_cycle = 0; }
         else if (argv[1][0] == '2') { current_mode = 2; auto_cycle = 0; }
@@ -605,6 +668,7 @@ void main_loop(long argc, char **argv) {
     }
 
     /* 1. 初始化 AW20054 渐变时间 */
+#ifndef DEVICE_OH2P
     int fd_fade = sys_openat(AT_FDCWD, PATH_LED_FADE, O_WRONLY, 0);
     if (fd_fade >= 0) {
         static const char fr[] = "r 0xff\n";
@@ -615,9 +679,13 @@ void main_loop(long argc, char **argv) {
         sys_write(fd_fade, fb, sizeof(fb) - 1);
         sys_close(fd_fade);
     }
+#endif
 
     /* 2. 打开 LED 控制接口 */
     int fd_led = sys_openat(AT_FDCWD, PATH_LED_RGB, O_WRONLY, 0);
+#ifdef DEVICE_OH2P
+    if (fd_led < 0) sys_exit(1);
+#endif
     for (int i = 0; i < 18; i++) {
         current_colors[i] = C_BLACK;
         last_colors[i] = 0xFFFFFFFF;
@@ -627,6 +695,9 @@ void main_loop(long argc, char **argv) {
 
     /* 3. 启动硬件 PCM 流 */
     int fd_audio = spawn_arecord();
+#ifdef DEVICE_OH2P
+    if (fd_audio < 0) sys_exit(1);
+#endif
 
     /* AGC 与平滑状态变量 (8 个频段分别独立追踪) */
     int high_l[8], low_l[8], level_l[8];
@@ -662,6 +733,10 @@ void main_loop(long argc, char **argv) {
         }
 
         if (done < needed) {
+#ifdef DEVICE_OH2P
+            /* Fail visibly; the parent guard stops our own capture child. */
+            sys_exit(1);
+#endif
             /* 音频子进程异常或管道断开，重新拉起 */
             sys_close(fd_audio);
             struct timespec delay = {0, 100000000L};
