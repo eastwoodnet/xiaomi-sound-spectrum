@@ -1,6 +1,8 @@
 #!/bin/sh
 # OH2P 1.62.2 only. Keep factory services, the app preference and boot files intact.
 # This foreground launcher exits on factory interaction; it does not auto-resume.
+check_only=0
+if [ "${1:-}" = --check ]; then check_only=1; shift; fi
 mode=${1:-auto}
 brightness=${2:-20}
 duration=${3:-0}
@@ -32,7 +34,8 @@ snapshot() {
     [ "$state" = 'stored led ids: ; current id 0' ]
 }
 
-snapshot || { echo 'Turn off music lighting in the app and wait for factory dialogue to finish' >&2; exit 3; }
+snapshot || { echo 'Turn off music lighting in the app and wait for factory dialogue to finish' >&2; exit 4; }
+[ "$check_only" = 0 ] || exit 0
 lock=/tmp/xiaomi-spectrum-oh2p.lock
 mkdir "$lock" 2>/dev/null || { echo "Already running, or stale lock: $lock" >&2; exit 3; }
 child=

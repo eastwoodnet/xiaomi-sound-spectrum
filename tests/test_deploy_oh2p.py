@@ -23,6 +23,7 @@ class DeploymentGuardTests(unittest.TestCase):
         header[18:20] = b"\xb7\x00"
         (self.directory / "led_music_oh2p").write_bytes(header)
         (self.directory / "run-oh2p.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+        (self.directory / "service-oh2p.sh").write_text("#!/bin/sh\n", encoding="utf-8")
 
     def invoke(self, result):
         with patch.object(deploy, "run", side_effect=result) as remote, \
