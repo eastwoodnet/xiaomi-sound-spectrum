@@ -39,6 +39,17 @@ class ServiceTests(unittest.TestCase):
     def call(self, action):
         return subprocess.run(["sh", str(self.service), action], capture_output=True, text=True, timeout=15)
 
+    def unrelated_process(self):
+        process = subprocess.Popen(["sleep", "30"])
+
+        def cleanup():
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=5)
+
+        self.addCleanup(cleanup)
+        return process
+
     def wait_for(self, predicate, timeout=12):
         end = time.monotonic() + timeout
         while time.monotonic() < end:
@@ -49,8 +60,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_singleton_detach_and_scoped_stop(self):
         self.ready.touch()
-        unrelated = subprocess.Popen(["sleep", "30"])
-        self.addCleanup(lambda: unrelated.poll() is None and unrelated.terminate())
+        unrelated = self.unrelated_process()
         self.assertEqual(self.call("start").returncode, 0)
         owner = (STATE / "owner").read_text()
         self.assertEqual(self.call("start").returncode, 0)
@@ -75,8 +85,7 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(STATE.exists())
 
     def test_stale_pid_cannot_kill_unrelated_process(self):
-        unrelated = subprocess.Popen(["sleep", "30"])
-        self.addCleanup(lambda: unrelated.poll() is None and unrelated.terminate())
+        unrelated = self.unrelated_process()
         STATE.mkdir()
         (STATE / "owner").write_text(f"{unrelated.pid} 0\n")
         (STATE / "child").write_text(f"{unrelated.pid} 0\n")
