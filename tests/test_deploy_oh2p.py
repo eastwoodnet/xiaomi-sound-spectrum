@@ -58,6 +58,45 @@ class DeploymentGuardTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         remote.assert_not_called()
 
+    def test_interactive_and_explicit_hosts_use_same_deployment(self):
+        commands = []
+        for host_args in (["speaker"], []):
+            responses = [
+                subprocess.CompletedProcess([], 0, "/tmp/oh2p-spectrum-upload.ABC123\n"),
+                subprocess.CompletedProcess([], 0),
+                subprocess.CompletedProcess([], 0),
+            ]
+            with patch("builtins.input", return_value="  speaker  ") as prompt, \
+                 patch.object(deploy, "run", side_effect=responses) as remote, \
+                 patch.object(deploy.shutil, "which", return_value="openssh"), \
+                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                rc = deploy.main([*host_args, "--source-dir", str(self.directory), "--temporary"])
+            self.assertEqual(rc, 0)
+            self.assertEqual(prompt.call_count, 0 if host_args else 1)
+            self.assertEqual(remote.call_count, 3)
+            commands.append(remote.call_args_list)
+        self.assertEqual(commands[0], commands[1])
+
+    def test_invalid_interactive_host_never_connects(self):
+        for host in ("", "   ", "bad host", "speaker;command", "-oProxyCommand=command"):
+            with self.subTest(host=host), \
+                 patch("builtins.input", return_value=host), \
+                 patch.object(deploy, "run") as remote, \
+                 redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    deploy.main([])
+                self.assertEqual(error.exception.code, 2)
+                remote.assert_not_called()
+
+    def test_cancelled_interactive_input_never_connects(self):
+        for failure in (EOFError, KeyboardInterrupt):
+            with self.subTest(failure=failure), \
+                 patch("builtins.input", side_effect=failure), \
+                 patch.object(deploy, "run") as remote, \
+                 redirect_stderr(io.StringIO()):
+                self.assertEqual(deploy.main([]), 1)
+                remote.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

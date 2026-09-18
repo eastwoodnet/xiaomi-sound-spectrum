@@ -173,7 +173,7 @@ if {"true" if start else "false"}; then sh "$root/service-oh2p.sh" status; fi
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("host", help="音箱 IP 或 SSH 别名（以 root 连接）")
+    parser.add_argument("host", nargs="?", help="音箱 IP 或 SSH 别名；省略时交互输入（以 root 连接）")
     parser.add_argument("--source-dir", type=Path, default=Path(__file__).resolve().parent)
     parser.add_argument("--temporary", action="store_true", help="仅使用 /tmp，不设置开机自启")
     parser.add_argument("--mode", choices=("1", "2", "auto"), help="默认保留已有配置，首次为 auto")
@@ -182,6 +182,12 @@ def main(argv=None):
     parser.add_argument("--no-start", action="store_true", help="安装后暂不启动后台服务")
     parser.add_argument("--ssh-option", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
+    if args.host is None:
+        try:
+            args.host = input("请输入音箱 IP 或 SSH 别名: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n已取消部署。", file=sys.stderr)
+            return 1
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*|\[[A-Fa-f0-9:]+\]", args.host):
         parser.error("host 应为 IP、主机名、SSH 别名或方括号内的 IPv6 地址")
     try:
