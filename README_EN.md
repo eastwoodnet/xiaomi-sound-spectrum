@@ -6,7 +6,7 @@ An ultra-low-latency music visualizer for the **Xiaomi Xiaoai Smart Speaker (Mod
 
 ---
 
-> 🎬 **Demo Video**: [Watch the live demonstration on X (Twitter)](https://x.com/eastwoodnet/status/2100857481794605311)
+> 🎬 **Demo Video**: [Watch the live demonstration on YouTube](https://www.youtube.com/shorts/diHwyLa1s8Q)
 
 > ⚠️ **Compatibility Notice**:  
 > Tested exclusively on **Xiaomi Sound (L06A)**. Other models (e.g., Xiaomi Sound Pro, Xiaoai Pro, Redmi Touch Display) feature different audio routing and LED drivers; compatibility is not guaranteed.
