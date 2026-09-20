@@ -84,7 +84,7 @@ def deploy():
 
         # 停止所有旧服务与残留进程
         chan = transport.open_session()
-        chan.exec_command("killall -9 led_music music_smooth.sh arecord 2>/dev/null; /etc/init.d/led stop 2>/dev/null")
+        chan.exec_command("killall -9 led_guard.sh led_music music_smooth.sh arecord 2>/dev/null")
         time.sleep(1)
         chan.close()
 
@@ -100,19 +100,32 @@ def deploy():
         chan.close()
         print("[+] 原生二进制上传完毕并赋予可执行权限。")
 
-        print("[*] 正在启动原生 C 后台守护进程 (ALSA Loopback + 1024点 FFT 模式)...")
-        chan = transport.open_session()
-        chan.exec_command("start-stop-daemon -S -b -m -p /tmp/led_music.pid -x /data/led_music -- auto")
-        time.sleep(1)
-        chan.close()
+        guard_path = os.path.join(os.path.dirname(__file__), "led_guard.sh")
+        if os.path.exists(guard_path):
+            print("[*] 正在上传智能声光律动守护脚本 led_guard.sh 到音箱 /data/led_guard.sh ...")
+            with open(guard_path, "rb") as f:
+                guard_content = f.read()
+            chan = transport.open_session()
+            chan.exec_command("cat > /data/led_guard.sh && chmod +x /data/led_guard.sh")
+            chan.sendall(guard_content)
+            chan.shutdown_write()
+            time.sleep(1)
+            chan.close()
+            print("[+] 守护脚本上传完毕并赋予可执行权限。")
 
-        print("[*] 正在配置开机自启 /data/init.sh ...")
+        print("[*] 正在配置开机自启 /data/init.sh (断电重启自动保持)...")
         chan = transport.open_session()
         chan.exec_command("""cat << 'EOF' > /data/init.sh
 #!/bin/sh
-/etc/init.d/led stop 2>/dev/null
-if [ -f /data/led_music ]; then
-    start-stop-daemon -S -b -m -p /tmp/led_music.pid -x /data/led_music -- auto
+# 1. 默认先恢复官方 led 交互服务 (唤醒/音量/通知灯效)
+/etc/init.d/led start 2>/dev/null
+
+# 2. 终止残留守护进程
+killall -9 led_guard.sh 2>/dev/null
+
+# 3. 启动智能声光律动后台守护服务
+if [ -f /data/led_guard.sh ]; then
+    /data/led_guard.sh >/dev/null 2>&1 &
 fi
 EOF
 chmod +x /data/init.sh
@@ -121,24 +134,30 @@ chmod +x /data/init.sh
         chan.close()
         print("[+] 开机持久化自启配置完成！")
 
+        print("[*] 正在启动智能声光律动守护服务 (3秒轮询检测 / 放歌自动律动 / 闲置还原官方)...")
+        chan = transport.open_session()
+        chan.exec_command("/data/led_guard.sh >/dev/null 2>&1 &")
+        time.sleep(2)
+        chan.close()
+
         # 检查进程状态
         chan = transport.open_session()
-        chan.exec_command("ps | grep -E 'led_music|arecord'; cat /tmp/visualizer_mode 2>/dev/null")
+        chan.exec_command("ps | grep -E 'led_guard|ledserver|led_music'; ubus call mediaplayer player_get_play_status 2>/dev/null")
         time.sleep(1)
         out = b""
         while chan.recv_ready():
             out += chan.recv(65535)
-        print("\n[当前运行进程与模式]:")
+        print("\n[当前运行进程与状态]:")
         print(out.decode().strip())
         chan.close()
 
         print("\n" + "="*60)
-        print("🎉 恭喜！小米 Sound 原生 ALSA Loopback + 1024点 FFT 音乐律动系统部署成功！")
-        print("• 音频捕获: ALSA hw:0,2 硬件数字回环 (48kHz / 16-bit / 双声道无损)")
-        print("• 频谱引擎: 左右声道独立 1024 点定点 FFT + 汉宁窗 + 8 大频带 AGC")
-        print("• 模式 1: 双翼 8 频段真·声学均衡器 (纯硬件 FFT 驱动)")
-        print("• 模式 2: 重低音大动态立体声律动 (动态色温 + 峰值悬停)")
-        print("• 每 1 分钟自动轮换，支持音乐暂停智能熄灭与微光待机。")
+        print("🎉 恭喜！小米 Sound 智能动态声光律动系统 (v1.0-beta2) 部署成功！")
+        print("• 智能守护: 每 3 秒自动通过 ubus 监测音乐播放状态")
+        print("• 音乐播放: 自动切入原生 1024点 FFT 震撼音乐律动")
+        print("• 音乐停止/闲置: 自动切回官方 ledserver，100% 恢复呼唤小爱光环与音量交互")
+        print("• 麦克风保护: 闲置时绝不抢占麦克风，说话走动绝不误闪乱动")
+        print("• 持久自启: 开机自启 /data/init.sh 已永久生效，断电重启不丢失")
         print("="*60)
 
     finally:
