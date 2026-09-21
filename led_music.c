@@ -519,14 +519,240 @@ static inline void set_all_leds(uint32_t color) {
     for (int i = 0; i < 18; i++) current_colors[i] = color;
 }
 
+/* ================================================================
+ * 模式 3: 彩虹熔岩流动 (HSV 色相行波模型)
+ * ================================================================ */
+
+/* 简单 LCG 伪随机数生成器 */
+static uint32_t lava_seed = 12345;
+static inline int lava_rand(int range) {
+    lava_seed = lava_seed * 1103515245 + 12345;
+    int r = (lava_seed >> 16) & 0x7FFF;
+    if (range <= 0) return 0;
+    return (r % range) - range / 2;
+}
+
+/* 整数 HSV -> BGR 转换 (h: 0-359, s: 0-255, v: 0-255) */
+static inline uint32_t hsv_to_bgr(int h, int s, int v) {
+    if (s == 0) return ((uint32_t)v << 16) | ((uint32_t)v << 8) | (uint32_t)v;
+    while (h < 0) h += 360;
+    while (h >= 360) h -= 360;
+    int region = h / 60;
+    int remainder = h - (region * 60);
+    int p = (v * (255 - s)) / 255;
+    int q = (v * (255 - (s * remainder) / 60)) / 255;
+    int t = (v * (255 - (s * (60 - remainder)) / 60)) / 255;
+    int r, g, b;
+    switch (region) {
+        case 0:  r = v; g = t; b = p; break;
+        case 1:  r = q; g = v; b = p; break;
+        case 2:  r = p; g = v; b = t; break;
+        case 3:  r = p; g = q; b = v; break;
+        case 4:  r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+    return ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+}
+
+/* 熔岩状态: 每颗 LED 的色相角 (0-3599, 即 0.0-359.9 度 x10) */
+static int lava_hue[18];
+static int lava_initialized = 0;
+
+static void render_lava(int *level_l, int *level_r) {
+    /* 初始化: 均匀分布色相 + 随机偏移 */
+    if (!lava_initialized) {
+        for (int i = 0; i < 18; i++) {
+            lava_hue[i] = (i * 200) + lava_rand(200) + 100;
+            while (lava_hue[i] < 0) lava_hue[i] += 3600;
+            while (lava_hue[i] >= 3600) lava_hue[i] -= 3600;
+        }
+        lava_initialized = 1;
+    }
+
+    /* 低频 (Band 0+1) 驱动旋转速度 */
+    int bass_l = (level_l[0] * 2 + level_l[1]) / 3;
+    int bass_r = (level_r[0] * 2 + level_r[1]) / 3;
+    int bass = (bass_l + bass_r) / 2;
+    int base_speed = 3 + bass / 8;  /* 3 ~ 15 (单位: 0.1度/帧) */
+
+    /* 中频 (Band 2-5) 影响饱和度 */
+    int mid_energy = (level_l[2] + level_r[2] + level_l[3] + level_r[3]
+                    + level_l[4] + level_r[4] + level_l[5] + level_r[5]) / 8;
+    int saturation = 180 + mid_energy * 75 / 100;  /* 180 ~ 255 */
+    if (saturation > 255) saturation = 255;
+
+    /* 高频 (Band 6+7) 亮度脉冲 */
+    int treble = (level_l[6] + level_r[6] + level_l[7] + level_r[7]) / 4;
+    int brightness_boost = 0;
+    if (treble > 60) brightness_boost = (treble - 60) * 3 / 2;  /* 0 ~ 60 */
+    if (brightness_boost > 60) brightness_boost = 60;
+
+    /* 全频段均值 -> 基础亮度 */
+    int total = 0;
+    for (int b = 0; b < 8; b++) total += (level_l[b] + level_r[b]);
+    int avg = total / 16;  /* 0-100 */
+    int base_brightness = 100 + avg * 120 / 100;  /* 100 ~ 220 */
+    if (base_brightness > 220) base_brightness = 220;
+
+    /* 保存旧色相用于 Jacobi 式对称更新 */
+    int old_hue[18];
+    for (int i = 0; i < 18; i++) old_hue[i] = lava_hue[i];
+
+    for (int i = 0; i < 18; i++) {
+        int left_idx = (i + 17) % 18;
+        int right_idx = (i + 1) % 18;
+
+        /* 色相旋转: 基础速度 + 随机微扰 */
+        lava_hue[i] = old_hue[i] + base_speed + lava_rand(6);
+
+        /* 邻域相位耦合: 向邻居平均色相方向偏移 */
+        int h_left = old_hue[left_idx];
+        int h_right = old_hue[right_idx];
+        /* 处理环绕: 确保差值在 [-1800, 1800] 范围 */
+        int diff_left = h_left - old_hue[i];
+        if (diff_left > 1800) diff_left -= 3600;
+        if (diff_left < -1800) diff_left += 3600;
+        int diff_right = h_right - old_hue[i];
+        if (diff_right > 1800) diff_right -= 3600;
+        if (diff_right < -1800) diff_right += 3600;
+        int coupling = (diff_left + diff_right) / 8;  /* 柔和耦合 */
+        lava_hue[i] += coupling;
+
+        /* 规范化到 [0, 3600) */
+        while (lava_hue[i] < 0) lava_hue[i] += 3600;
+        while (lava_hue[i] >= 3600) lava_hue[i] -= 3600;
+
+        /* 亮度: 基础 + 高频脉冲 + 微量随机 */
+        int v = base_brightness + brightness_boost + lava_rand(20);
+        if (v < 30) v = 30;
+        if (v > 220) v = 220;
+
+        /* 对称立体声微调: 左半环偏左声道亮度, 右半环偏右声道 */
+        int stereo_boost = 0;
+        if (i >= 1 && i <= 8) {
+            stereo_boost = (bass_l - bass_r) / 4;
+        } else if (i >= 10 && i <= 17) {
+            stereo_boost = (bass_r - bass_l) / 4;
+        }
+        v += stereo_boost;
+        if (v < 30) v = 30;
+        if (v > 220) v = 220;
+
+        current_colors[i] = hsv_to_bgr(lava_hue[i] / 10, saturation, v);
+    }
+}
+
+/* ================================================================
+ * 模式 4: 环形立体声频谱 (Ring Spectrum)
+ * ================================================================ */
+
+/* LED -> 频段映射 (对称镜像, 左翼左声道/右翼右声道)
+ * LED 9:  正面锚点 (低音鼓心跳)
+ * LED 8-1: Band 0-7 左翼 (左声道, 低频→高频, 从前到后)
+ * LED 0:  背面锚点 (全频段动态混色)
+ * LED 10-17: Band 0-7 右翼 (右声道, 低频→高频, 从前到后)
+ */
+static const int LED_TO_BAND[18] = {
+    -1,  /* LED 0:  背面锚点 */
+     7,  /* LED 1:  Band 7 Air */
+     6,  /* LED 2:  Band 6 Treble */
+     5,  /* LED 3:  Band 5 Presence */
+     4,  /* LED 4:  Band 4 High Mids */
+     3,  /* LED 5:  Band 3 Midrange */
+     2,  /* LED 6:  Band 2 Low Mids */
+     1,  /* LED 7:  Band 1 Bass Punch */
+     0,  /* LED 8:  Band 0 Sub-Bass */
+    -2,  /* LED 9:  正面锚点 (低音鼓心跳) */
+     0,  /* LED 10: Band 0 Sub-Bass */
+     1,  /* LED 11: Band 1 Bass Punch */
+     2,  /* LED 12: Band 2 Low Mids */
+     3,  /* LED 13: Band 3 Midrange */
+     4,  /* LED 14: Band 4 High Mids */
+     5,  /* LED 15: Band 5 Presence */
+     6,  /* LED 16: Band 6 Treble */
+     7   /* LED 17: Band 7 Air */
+};
+
+static void render_spectrum(int *level_l, int *level_r) {
+    /* 背面锚点 LED 0: 全频段动态混色 */
+    int total_l = 0, total_r = 0;
+    for (int b = 0; b < 8; b++) {
+        total_l += level_l[b];
+        total_r += level_r[b];
+    }
+    int avg_level = (total_l + total_r) / 16;  /* 0-100 */
+    /* 全频段混色: 低频偏红, 高频偏蓝, 以频段能量加权 */
+    int sum_all = total_l + total_r;
+    uint32_t back_color;
+    if (sum_all > 0) {
+        int bass_w = (level_l[0] + level_r[0] + level_l[1] + level_r[1]) * 100 / sum_all;
+        int treble_w = (level_l[6] + level_r[6] + level_l[7] + level_r[7]) * 100 / sum_all;
+        if (bass_w > 40) {
+            back_color = blend_color(0x0020FF, 0x0080FF, (100 - bass_w) * 2);
+        } else if (treble_w > 30) {
+            back_color = blend_color(0xFF7500, 0xFF40FF, treble_w * 2);
+        } else {
+            back_color = blend_color(0x00FF30, 0xFFFF00, 50);
+        }
+    } else {
+        back_color = 0x100002;
+    }
+    int back_pct = avg_level;
+    if (back_pct > 100) back_pct = 100;
+    current_colors[0] = scale_color(back_color, back_pct);
+
+    /* 正面锚点 LED 9: 低音鼓心跳脉冲 */
+    int bass_energy = (level_l[0] + level_r[0]) / 2;
+    if (bass_energy > 50) {
+        uint32_t bass_pulse = blend_color(0x0020FF, C_WHITE, (bass_energy - 50) * 2);
+        current_colors[9] = scale_color(bass_pulse, bass_energy);
+    } else {
+        current_colors[9] = scale_color(0x0000FF, bass_energy);
+    }
+
+    /* 频段 LED 渲染 (保留立体声) */
+    for (int i = 0; i < 18; i++) {
+        int band = LED_TO_BAND[i];
+        if (band < 0) continue;  /* 锚点已处理 */
+
+        /* 选择对应声道 */
+        int lev;
+        if (i >= 1 && i <= 8) {
+            lev = level_l[band];  /* 左翼 = 左声道 */
+        } else {
+            lev = level_r[band];  /* 右翼 = 右声道 */
+        }
+
+        /* 亮度缩放: 正确归一化到 0-100 */
+        int brightness_pct = 30 + lev * 70 / 100;  /* 30 ~ 100 */
+
+        uint32_t color = PAL_SPECTRUM[band];
+
+        /* 峰值向白混合 (>85) */
+        if (lev > 85) {
+            int white_pct = (lev - 85) * 6;
+            if (white_pct > 60) white_pct = 60;
+            color = blend_color(color, C_WHITE, white_pct);
+        }
+
+        current_colors[i] = scale_color(color, brightness_pct);
+    }
+}
+
 static void log_mode(int mode) {
     int fd = sys_openat(AT_FDCWD, PATH_MODE_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
         if (mode == 1) {
             static const char m[] = "模式 1: 双翼 8 频段真·声学均衡器 (纯硬件 FFT 驱动)\n";
             sys_write(fd, m, sizeof(m) - 1);
-        } else {
+        } else if (mode == 2) {
             static const char m[] = "模式 2: 重低音大动态立体声律动 (动态色温 + 峰值悬停)\n";
+            sys_write(fd, m, sizeof(m) - 1);
+        } else if (mode == 3) {
+            static const char m[] = "模式 3: 彩虹熔岩流动 (HSV 色相行波)\n";
+            sys_write(fd, m, sizeof(m) - 1);
+        } else {
+            static const char m[] = "模式 4: 环形立体声频谱 (对称镜像)\n";
             sys_write(fd, m, sizeof(m) - 1);
         }
         sys_close(fd);
@@ -601,6 +827,8 @@ void main_loop(long argc, char **argv) {
     if (argc >= 2 && argv[1]) {
         if (argv[1][0] == '1') { current_mode = 1; auto_cycle = 0; }
         else if (argv[1][0] == '2') { current_mode = 2; auto_cycle = 0; }
+        else if (argv[1][0] == '3') { current_mode = 3; auto_cycle = 0; }
+        else if (argv[1][0] == '4') { current_mode = 4; auto_cycle = 0; }
         else if (argv[1][0] == 'a') { auto_cycle = 1; }
     }
 
@@ -812,7 +1040,7 @@ void main_loop(long argc, char **argv) {
             mode_frame_counter++;
             if (mode_frame_counter >= 2800) { /* ~60秒轮换 */
                 mode_frame_counter = 0;
-                current_mode = (current_mode == 1) ? 2 : 1;
+                current_mode = (current_mode >= 4) ? 1 : current_mode + 1;
                 log_mode(current_mode);
             }
         }
@@ -868,7 +1096,7 @@ void main_loop(long argc, char **argv) {
                 current_colors[9] = scale_color(0xFF40FF, treble_energy);
             }
 
-        } else {
+        } else if (current_mode == 2) {
             /* ===========================================================
              * 模式 2: 重低音大动态立体声律动 (动态色温 + 峰值悬停)
              * 重低音控制灯条延伸展翼长度 (从顶部 0 向下延伸至 8 与 10)
@@ -942,6 +1170,19 @@ void main_loop(long argc, char **argv) {
             } else {
                 current_colors[9] = C_BASE;
             }
+
+        } else if (current_mode == 3) {
+            /* ===========================================================
+             * 模式 3: 彩虹熔岩流动 (HSV 色相行波模型)
+             * 全 RGB 色域流动, 低频驱动旋转, 高频脉冲闪烁
+             * =========================================================== */
+            render_lava(level_l, level_r);
+
+        } else {
+            /* ===========================================================
+             * 模式 4: 环形立体声频谱 (对称镜像, 左右声道分离)
+             * =========================================================== */
+            render_spectrum(level_l, level_r);
         }
 
         /* 提交差量 I2C 硬件写入 (Deadband >= 6) */
