@@ -655,99 +655,148 @@ static void render_lava(int *level_l, int *level_r) {
 }
 
 /* ================================================================
- * 模式 4: 二维色阶立体声环形频谱 (2D HSV Phase Shift Matrix)
+ * 模式 4: 18 频段专业声学连续色谱 + 峰值非线性动力学
  *
- * 声道划分 (18 颗灯珠从 8, 9 中间切分):
- * - 正面分界线: LED 8 (左侧) 与 LED 9 (右侧)
- * - 背面分界线: LED 0 (左侧) 与 LED 17 (右侧)
- * - 左声道: LED 8(前/低频) -> 7 -> 6 -> 5 -> 4 -> 3 -> 2 -> 1 -> 0(后/高频)
- * - 右声道: LED 9(前/低频) -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17(后/高频)
+ * 物理与声学几何 (经过物理标定实测):
+ * - 0 号位于音箱【最后面】(电源线插孔处)
+ * - 8 与 9 号位于音箱【最前面】(小爱 Logo 处)
+ * - 俯视顺时针方向: 0 -> 1 -> 2 -> ... -> 8 -> 9 -> ... -> 17 -> 0
  *
- * 二维色阶量化设计:
- * 1. 横向色阶 (空间/频段维度 k = 0..8, 从前到后):
- *    沿环形分布冷调基色 (深海蓝 215° -> 靛蓝 -> 极光紫 305°),
- *    电平为 0 时保持约 45% (val=115) 优雅常亮底光，绝不熄灭。
- * 2. 纵向色阶 (能量/电平维度 lev = 0..100):
- *    频段波峰变化时驱动色相大角度向暖色跃迁 (最大 170°):
- *    - 低频 (k=0, 前): 深海蓝(215°) -> 极光青 -> 翠绿 -> 烈日金黄 -> 炽热火红(45°)
- *    - 中频 (k=4, 侧): 靛紫(260°) -> 赛博青 -> 荧光明黄(90°)
- *    - 高频 (k=8, 后): 极光紫(305°) -> 电光冰蓝 -> 翡翠翠绿(135°)
- *    波峰 (>75) 饱和度褪色白炽化，>88 触发纯白极光爆闪。
+ * 18 频段声学与色彩映射 (55Hz ~ 20kHz 完美对应 18 颗灯珠):
+ * - #0:  55 Hz   (LED 0,  最后面) -> 0°   (深红)
+ * - #1:  77 Hz   (LED 1,  左侧)   -> 20°  (赤橙)
+ * - #2:  110 Hz  (LED 2,  左侧)   -> 40°  (金橙)
+ * - #3:  156 Hz  (LED 3,  左侧)   -> 60°  (琥珀黄)
+ * - #4:  220 Hz  (LED 4,  左侧)   -> 80°  (黄绿)
+ * - #5:  311 Hz  (LED 5,  左侧)   -> 100° (青绿)
+ * - #6:  440 Hz  (LED 6,  左侧)   -> 120° (纯绿)
+ * - #7:  622 Hz  (LED 7,  左侧)   -> 140° (碧绿)
+ * - #8:  880 Hz  (LED 8,  最前左) -> 160° (青翠)
+ * - #9:  1.2 kHz (LED 9,  最前右) -> 180° (赛博青)
+ * - #10: 1.8 kHz (LED 10, 右侧)   -> 200° (天青蓝)
+ * - #11: 2.5 kHz (LED 11, 右侧)   -> 220° (湛蓝)
+ * - #12: 3.5 kHz (LED 12, 右侧)   -> 240° (正蓝)
+ * - #13: 5.0 kHz (LED 13, 右侧)   -> 260° (靛蓝)
+ * - #14: 7.0 kHz (LED 14, 右侧)   -> 280° (霓虹紫)
+ * - #15: 10 kHz  (LED 15, 右侧)   -> 300° (洋红)
+ * - #16: 14 kHz  (LED 16, 右侧)   -> 320° (玫瑰红)
+ * - #17: 20 kHz  (LED 17, 最后面) -> 340° (深绯红，与 0 号闭合)
+ *
+ * 峰值非线性动力学 (Peak Nonlinear Dynamics):
+ * 1. 底噪与垫乐吸收门限 (Threshold = 32):
+ *    平缓信号保持静止连续彩虹底光 (约 38% 亮度, val=95), 不熄灭、不随杂音抖动。
+ * 2. 高阶非线性幂律爆发 (Quadratic Power Curve):
+ *    冲过门限的强拍能量二次方放大, 彻底拉开动态对比。
+ * 3. 峰值跃迁变色 (Peak Metamorphosis):
+ *    色相大角度扭转 (+120°), 饱和度脱色白炽化, 巅峰 (>78) 混入纯白爆闪!
  * ================================================================ */
-static const int BAND_MAP_9[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 7 };
+static const struct {
+    int start_bin;
+    int end_bin;
+    int min_diff;
+} BANDS_18[18] = {
+    {   1,   1, 3000 }, /* #0:  ~55 Hz   (Bin 1: 46.9 Hz) - Sub-Bass */
+    {   2,   2, 3000 }, /* #1:  ~77 Hz   (Bin 2: 93.8 Hz) - Kick Sub */
+    {   2,   3, 2800 }, /* #2:  ~110 Hz  (Bin 2-3: 94-141 Hz) - Kick Punch */
+    {   3,   4, 2500 }, /* #3:  ~156 Hz  (Bin 3-4: 141-188 Hz) - Body/Bass */
+    {   4,   6, 2200 }, /* #4:  ~220 Hz  (Bin 4-6: 188-281 Hz) - Low Mids / A3 */
+    {   6,   8, 2000 }, /* #5:  ~311 Hz  (Bin 6-8: 281-375 Hz) - Snare Body */
+    {   8,  11, 1800 }, /* #6:  ~440 Hz  (Bin 8-11: 375-516 Hz) - Standard A4 */
+    {  11,  16, 1600 }, /* #7:  ~622 Hz  (Bin 11-16: 516-750 Hz) - Vocal Fundamental */
+    {  16,  22, 1400 }, /* #8:  ~880 Hz  (Bin 16-22: 750-1031 Hz) - Vocal Core / A5 */
+    {  22,  32, 1200 }, /* #9:  ~1.2 kHz (Bin 22-32: 1031-1500 Hz) - Vocal Clarity */
+    {  32,  45, 1000 }, /* #10: ~1.8 kHz (Bin 32-45: 1500-2109 Hz) - Lead/Synth */
+    {  45,  64,  900 }, /* #11: ~2.5 kHz (Bin 45-64: 2109-3000 Hz) - Snare Crack */
+    {  64,  90,  800 }, /* #12: ~3.5 kHz (Bin 64-90: 3000-4219 Hz) - Presence Peak */
+    {  90, 128,  700 }, /* #13: ~5.0 kHz (Bin 90-128: 4219-6000 Hz) - High Presence */
+    { 128, 181,  600 }, /* #14: ~7.0 kHz (Bin 128-181: 6000-8484 Hz) - Cymbals/Shimmer */
+    { 181, 256,  500 }, /* #15: ~10.0 kHz (Bin 181-256: 8484-12000 Hz) - Hi-Hats */
+    { 256, 362,  400 }, /* #16: ~14.0 kHz (Bin 256-362: 12000-16969 Hz) - Air Band */
+    { 362, 440,  350 }  /* #17: ~20.0 kHz (Bin 362-440: 16969-20625 Hz) - Top Air */
+};
 
-static void render_spectrum(int *level_l, int *level_r) {
-    for (int k = 0; k < 9; k++) {
-        /* 1. 横向基准色相 (0.1度精度): 215.0° 到 305.0° (深海蓝 -> 极光紫) */
-        int h_base = 2150 + (k * 900) / 8;
+static int high_18[18];
+static int low_18[18];
+static int level_18[18];
+static int inited_18 = 0;
 
-        /* ---------- 左声道 (LED 8 - k) ---------- */
-        {
-            int led_idx = 8 - k;
-            int lev = (k < 8) ? level_l[BAND_MAP_9[k]] : (level_l[6] + level_l[7]) / 2;
+static void render_spectrum(const int *left_mags, const int *right_mags) {
+    if (!inited_18) {
+        for (int i = 0; i < 18; i++) {
+            high_18[i] = BANDS_18[i].min_diff * 2;
+            low_18[i] = 100;
+            level_18[i] = 0;
+        }
+        inited_18 = 1;
+    }
 
-            /* 纵向色相偏移 (最大 170.0°) */
-            int h_shift = (lev * 1700) / 100;
-            int h = h_base - h_shift;
-            while (h < 0) h += 3600;
-            while (h >= 3600) h -= 3600;
-
-            /* 饱和度与波峰白炽化 */
-            int sat = 245;
-            if (lev > 75) {
-                sat = 245 - ((lev - 75) * 115) / 25; /* 245 -> 130 */
-                if (sat < 100) sat = 100;
-            }
-
-            /* 亮度: 恒亮底光 (115) 到爆发光 (215)，主打色彩质变而非明暗闪烁 */
-            int val = 115 + (lev * 100) / 100;
-            if (val > 215) val = 215;
-
-            uint32_t color = hsv_to_bgr(h / 10, sat, val);
-
-            /* 波峰瞬态高光混合 (>88) */
-            if (lev > 88) {
-                int white_mix = (lev - 88) * 5; /* 0 ~ 60% */
-                if (white_mix > 60) white_mix = 60;
-                color = blend_color(color, C_WHITE, white_mix);
-            }
-
-            current_colors[led_idx] = color;
+    for (int b = 0; b < 18; b++) {
+        int start = BANDS_18[b].start_bin;
+        int end = BANDS_18[b].end_bin;
+        int max_e = 0;
+        for (int i = start; i <= end; i++) {
+            if (left_mags[i] > max_e) max_e = left_mags[i];
+            if (right_mags[i] > max_e) max_e = right_mags[i];
         }
 
-        /* ---------- 右声道 (LED 9 + k) ---------- */
-        {
-            int led_idx = 9 + k;
-            int lev = (k < 8) ? level_r[BAND_MAP_9[k]] : (level_r[6] + level_r[7]) / 2;
+        /* 自适应增益追踪 (Attack 即时, Decay 柔和) */
+        if (max_e > high_18[b]) high_18[b] = max_e;
+        else high_18[b] = (high_18[b] * 199 + max_e) / 200;
 
-            /* 纵向色相偏移 (最大 170.0°) */
-            int h_shift = (lev * 1700) / 100;
-            int h = h_base - h_shift;
-            while (h < 0) h += 3600;
-            while (h >= 3600) h -= 3600;
+        if (max_e < low_18[b]) low_18[b] = max_e;
+        else low_18[b] = (low_18[b] * 199 + max_e) / 200;
 
-            /* 饱和度与波峰白炽化 */
-            int sat = 245;
-            if (lev > 75) {
-                sat = 245 - ((lev - 75) * 115) / 25;
-                if (sat < 100) sat = 100;
-            }
+        int diff = high_18[b] - low_18[b];
+        if (diff < BANDS_18[b].min_diff) diff = BANDS_18[b].min_diff;
 
-            /* 亮度 */
-            int val = 115 + (lev * 100) / 100;
-            if (val > 215) val = 215;
-
-            uint32_t color = hsv_to_bgr(h / 10, sat, val);
-
-            /* 波峰瞬态高光混合 (>88) */
-            if (lev > 88) {
-                int white_mix = (lev - 88) * 5;
-                if (white_mix > 60) white_mix = 60;
-                color = blend_color(color, C_WHITE, white_mix);
-            }
-
-            current_colors[led_idx] = color;
+        int raw = 0;
+        if (max_e > low_18[b]) {
+            raw = ((long)(max_e - low_18[b]) * 100) / diff;
+            if (raw > 100) raw = 100;
         }
+
+        /* 快速捕捉瞬态，平滑释放 */
+        if (raw >= level_18[b]) level_18[b] = raw;
+        else level_18[b] = (level_18[b] * 84) / 100;
+
+        int lev = level_18[b];
+
+        /* 峰值非线性门限过滤: lev < 32 属于底电平/伴奏背景，不触发律动抖动 */
+        int peak_act = 0;
+        if (lev > 32) {
+            int norm = ((lev - 32) * 100) / 68; /* 0 ~ 100 */
+            peak_act = (norm * norm) / 100;    /* 二次方非线性幂律放大 0 ~ 100 */
+        }
+
+        /* 18 颗连续色谱基准色相: 360° 均匀分为 18 份，步长 20.0° (200) */
+        int h_base = b * 200;
+
+        /* 峰值触发色相向高能互补方向大角度跃迁 (+120.0°) */
+        int h_shift = (peak_act * 1200) / 100;
+        int h = h_base + h_shift;
+        while (h >= 3600) h -= 3600;
+
+        /* 峰值脱色白炽化 */
+        int sat = 245;
+        if (peak_act > 40) {
+            sat = 245 - ((peak_act - 40) * 155) / 60;
+            if (sat < 85) sat = 85;
+        }
+
+        /* 亮度: 恒定温润底光 (95, ~38%) 保持彩虹环完整，峰值跃迁至 220 */
+        int val = 95 + (peak_act * 125) / 100;
+        if (val > 220) val = 220;
+
+        uint32_t color = hsv_to_bgr(h / 10, sat, val);
+
+        /* 强峰值瞬态白光爆闪 (>78) */
+        if (peak_act > 78) {
+            int white_mix = (peak_act - 78) * 4;
+            if (white_mix > 80) white_mix = 80;
+            color = blend_color(color, C_WHITE, white_mix);
+        }
+
+        current_colors[b] = color;
     }
 }
 
@@ -764,7 +813,7 @@ static void log_mode(int mode) {
             static const char m[] = "模式 3: 彩虹熔岩流动 (HSV 色相行波)\n";
             sys_write(fd, m, sizeof(m) - 1);
         } else {
-            static const char m[] = "模式 4: 二维色阶环形立体声 (2D HSV 色相跃迁)\n";
+            static const char m[] = "模式 4: 18 频段连续色谱 (峰值非线性动力学)\n";
             sys_write(fd, m, sizeof(m) - 1);
         }
         sys_close(fd);
@@ -1193,9 +1242,9 @@ void main_loop(long argc, char **argv) {
 
         } else {
             /* ===========================================================
-             * 模式 4: 环形立体声频谱 (对称镜像, 左右声道分离)
+             * 模式 4: 18 频段连续色谱 (峰值非线性动力学)
              * =========================================================== */
-            render_spectrum(level_l, level_r);
+            render_spectrum(left_mags, right_mags);
         }
 
         /* 提交差量 I2C 硬件写入 (Deadband >= 6) */
