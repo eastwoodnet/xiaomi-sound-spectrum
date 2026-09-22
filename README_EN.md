@@ -193,7 +193,6 @@ The engine reloads the new palette within ~800ms seamlessly without stopping mus
 ├── palettes.conf       # Dynamic palette and theme configuration template (#RRGGBB)
 ├── build.sh            # Cross-compilation script (Clang/LLD, static strip)
 ├── deploy.py           # Automated SSH deployment and autostart configuration script
-├── EFFECTS.md          # Comprehensive acoustic visualizer algorithm design doc
 ├── README.md           # Chinese Documentation
 └── README_EN.md        # English Documentation
 ```

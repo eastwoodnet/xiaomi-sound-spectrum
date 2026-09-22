@@ -98,7 +98,7 @@
 
 ## 🏠 Home Assistant MQTT 远端控制与自动发现
 
-本项目全面支持 Home Assistant 的 **MQTT Discovery** 标准协议，无需繁琐的手写 YAML 配置。音箱启动后将自动注册为名为 **Xiaomi Sound** 的智能家居设备。
+本项目全面支持 Home Assistant 的 **MQTT Discovery** 标准协议，无需繁琐的手写 YAML 配置。音箱启动后将自动注册为名为 **Xiaomi Sound Light** 的智能家居设备。
 
 ### 1. 自动生成的 Home Assistant 实体
 
@@ -196,7 +196,6 @@ touch /tmp/reload_palette
 ├── palettes.conf       # 调色板与主题风格配置文件模板 (支持人类友好 #RRGGBB)
 ├── build.sh            # 宿主机交叉编译脚本 (基于 Clang/LLD，纯静态编译)
 ├── deploy.py           # 宿主机一键部署脚本 (自动化 SSH 部署、配置文件分发与开机自启)
-├── EFFECTS.md          # 详细四大声光律动算法与声学设计文档
 ├── README.md           # 中文说明文档
 └── README_EN.md        # English Documentation
 ```
