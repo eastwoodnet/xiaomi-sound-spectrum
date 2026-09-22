@@ -12,12 +12,181 @@
 #      - 麦克风未静音状态: 柔和白光首先全亮，随后向顶部双向对称逐对收拢熄灭，最后完全黑屏待机！
 #      - 动画过程中若切歌有新音乐注入，毫秒级无缝打断退场并继续律动！
 #      - 动画结束后恢复官方 ledserver 原生服务。
+#   4. Home Assistant MQTT 远端控制与自动发现 (MQTT Discovery):
+#      - 开机自启后主动向 HA 发送 MQTT Discovery 注册报文 (自动生成实体，免配 YAML)；
+#      - 实时订阅 xiaomi_sound/led/set 与 xiaomi_sound/led/power/set 控制指令；
+#      - 毫秒级热切换四大模式、自动轮换与关闭模式；
+#      - 自动轮换或状态变化时，双向回传状态，HA 界面同步更新；
+#      - 支持 LWT 遗嘱消息，音箱离线或断电时 HA 实体自动呈现不可用。
 # ==============================================================================
 
 GUARD_PID_FILE="/tmp/led_guard.pid"
 MUSIC_BIN="/data/led_music"
 POLL_INTERVAL=3
 LED_RGB="/sys/devices/i2c-0/0-003a/led_rgb"
+
+# ---------------- MQTT 远端控制配置与辅助函数 ----------------
+MQTT_CONF="/data/mqtt.conf"
+MQTT_HOST="192.168.1.1"
+MQTT_PORT="1883"
+MQTT_USER=""
+MQTT_PASS=""
+MQTT_ENABLED="1"
+
+if [ -f "$MQTT_CONF" ]; then
+    . "$MQTT_CONF"
+fi
+
+mqtt_pub() {
+    [ "$MQTT_ENABLED" != "1" ] && return 0
+    if [ -n "$MQTT_USER" ] && [ -n "$MQTT_PASS" ]; then
+        mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" "$@" 2>/dev/null
+    elif [ -n "$MQTT_USER" ]; then
+        mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" "$@" 2>/dev/null
+    else
+        mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" "$@" 2>/dev/null
+    fi
+}
+
+mqtt_sub() {
+    [ "$MQTT_ENABLED" != "1" ] && return 0
+    if [ -n "$MQTT_USER" ] && [ -n "$MQTT_PASS" ]; then
+        mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" "$@" 2>/dev/null
+    elif [ -n "$MQTT_USER" ]; then
+        mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" "$@" 2>/dev/null
+    else
+        mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" "$@" 2>/dev/null
+    fi
+}
+
+report_state() {
+    local mode_name="$1"
+    local pwr="$2"
+    local cur_active="$3"
+    [ -n "$mode_name" ] && mqtt_pub -t "xiaomi_sound/led/state" -m "$mode_name" -r
+    [ -n "$pwr" ] && mqtt_pub -t "xiaomi_sound/led/power/state" -m "$pwr" -r
+    [ -n "$cur_active" ] && mqtt_pub -t "xiaomi_sound/led/current_mode" -m "$cur_active" -r
+}
+
+send_ha_discovery() {
+    [ "$MQTT_ENABLED" != "1" ] && return 0
+    
+    # 1. 注册 Select 实体: 律动模式选择器
+    local disc_select="homeassistant/select/xiaomi_sound_l06a/led_mode/config"
+    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-beta2"}}'
+    mqtt_pub -t "$disc_select" -m "$payload_select" -r
+
+    # 2. 注册 Switch 实体: 律动总开关
+    local disc_switch="homeassistant/switch/xiaomi_sound_l06a/visualizer/config"
+    local payload_switch='{"name":"声光律动总开关","unique_id":"xiaomi_sound_l06a_visualizer_switch","command_topic":"xiaomi_sound/led/power/set","state_topic":"xiaomi_sound/led/power/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","payload_on":"ON","payload_off":"OFF","icon":"mdi:speaker-wireless","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-beta2"}}'
+    mqtt_pub -t "$disc_switch" -m "$payload_switch" -r
+
+    # 3. 注册 Sensor 实体: 当前运行律动 (实时显示实际运行模式或待机状态)
+    local disc_sensor="homeassistant/sensor/xiaomi_sound_l06a/current_mode/config"
+    local payload_sensor='{"name":"当前运行律动","unique_id":"xiaomi_sound_l06a_current_mode","state_topic":"xiaomi_sound/led/current_mode","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:waveform","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-beta2"}}'
+    mqtt_pub -t "$disc_sensor" -m "$payload_sensor" -r
+
+    # 4. 初始上线通知 (Retained)
+    mqtt_pub -t "xiaomi_sound/led/availability" -m "online" -r
+}
+
+switch_mode_action() {
+    local target_mode="$1"
+    if is_music_running; then
+        killall -9 led_music 2>/dev/null
+        start-stop-daemon -S -b -m -p /tmp/led_music.pid -x "$MUSIC_BIN" -- "$target_mode"
+    elif [ "$(get_play_status)" = "1" ]; then
+        start_music_visualizer
+    fi
+}
+
+handle_mode_command() {
+    local cmd="$1"
+    case "$cmd" in
+        "1"|*"模式 1"*)
+            echo "1" > /data/led_mode
+            switch_mode_action "1"
+            report_state "模式 1: 双翼声学均衡器" "ON" "模式 1: 双翼声学均衡器"
+            ;;
+        "2"|*"模式 2"*)
+            echo "2" > /data/led_mode
+            switch_mode_action "2"
+            report_state "模式 2: 重低音大动态立体声律动" "ON" "模式 2: 重低音大动态立体声律动"
+            ;;
+        "3"|*"模式 3"*)
+            echo "3" > /data/led_mode
+            switch_mode_action "3"
+            report_state "模式 3: 彩虹熔岩流动" "ON" "模式 3: 彩虹熔岩流动"
+            ;;
+        "4"|*"模式 4"*)
+            echo "4" > /data/led_mode
+            switch_mode_action "4"
+            report_state "模式 4: 全频律动" "ON" "模式 4: 全频律动"
+            ;;
+        "auto"|*"自动轮换"*)
+            rm -f /data/led_mode
+            switch_mode_action "auto"
+            report_state "自动轮换" "ON" "自动轮换中..."
+            ;;
+        "off"|*"关闭"*)
+            echo "off" > /data/led_mode
+            stop_music_visualizer
+            report_state "关闭律动 (恢复官方)" "OFF" "已关闭"
+            ;;
+    esac
+}
+
+mqtt_worker() {
+    while true; do
+        # 尝试发送上线与 Discovery 注册信息
+        if send_ha_discovery; then
+            # 上报当前初始状态
+            cur_name="自动轮换"
+            pwr_state="ON"
+            cur_active="待机 (官方交互)"
+            if [ -f /data/led_mode ]; then
+                cur_val=$(cat /data/led_mode 2>/dev/null | tr -d ' \n\r')
+                case "$cur_val" in
+                    1) cur_name="模式 1: 双翼声学均衡器" ;;
+                    2) cur_name="模式 2: 重低音大动态立体声律动" ;;
+                    3) cur_name="模式 3: 彩虹熔岩流动" ;;
+                    4) cur_name="模式 4: 全频律动" ;;
+                    off) cur_name="关闭律动 (恢复官方)"; pwr_state="OFF"; cur_active="已关闭" ;;
+                esac
+            fi
+            if is_music_running; then
+                cur_active="$cur_name"
+            fi
+            report_state "$cur_name" "$pwr_state" "$cur_active"
+
+            # 阻塞订阅控制指令，配置 LWT 离线遗嘱
+            mqtt_sub --will-topic "xiaomi_sound/led/availability" \
+                     --will-payload "offline" --will-retain \
+                     -t "xiaomi_sound/led/set" \
+                     -t "xiaomi_sound/led/power/set" -v | while read -r line; do
+                topic=$(echo "$line" | cut -d' ' -f1)
+                payload=$(echo "$line" | cut -d' ' -f2-)
+                if [ "$topic" = "xiaomi_sound/led/power/set" ]; then
+                    if [ "$payload" = "OFF" ] || [ "$payload" = "off" ]; then
+                        handle_mode_command "off"
+                    elif [ "$payload" = "ON" ] || [ "$payload" = "on" ]; then
+                        [ -f /data/led_mode ] && [ "$(cat /data/led_mode 2>/dev/null)" = "off" ] && rm -f /data/led_mode
+                        handle_mode_command "auto"
+                    fi
+                elif [ "$topic" = "xiaomi_sound/led/set" ]; then
+                    handle_mode_command "$payload"
+                fi
+            done
+        fi
+        sleep 5
+    done
+}
+
+start_mqtt_daemon() {
+    [ "$MQTT_ENABLED" != "1" ] && return 0
+    mqtt_worker &
+    MQTT_PID=$!
+}
 
 # 写入自身 PID
 echo $$ > "$GUARD_PID_FILE"
@@ -40,6 +209,10 @@ get_play_status() {
 }
 
 start_music_visualizer() {
+    # 如果用户通过 MQTT 设置了关闭律动 (off)，则不接管 LED
+    if [ -f /data/led_mode ] && [ "$(cat /data/led_mode 2>/dev/null | tr -d ' \n\r')" = "off" ]; then
+        return 0
+    fi
     if [ -f "$MUSIC_BIN" ]; then
         # 1. 停止官方 LED 交互服务并确保杀死残留
         /etc/init.d/led stop 2>/dev/null
@@ -98,10 +271,9 @@ play_exit_animation() {
             sleep 0.2
         done
         echo "9 $COLOR_RED" > "$LED_RGB" 2>/dev/null
-        sleep 0.8
     else
         # ==============================================================
-        # 场景 B: 麦克风未静音 —— 白色柔光全亮提示律动结束，随后双向收拢完全熄灭
+        # 场景 B: 麦克风未静音 —— 白光全亮后向顶部双向收拢熄灭
         # ==============================================================
         for i in $(seq 0 17); do
             echo "$i $COLOR_WHITE" > "$LED_RGB" 2>/dev/null
@@ -164,6 +336,9 @@ stop_music_visualizer() {
 }
 
 cleanup() {
+    [ -n "$MQTT_PID" ] && kill -9 "$MQTT_PID" 2>/dev/null
+    killall -9 mosquitto_sub 2>/dev/null
+    mqtt_pub -t "xiaomi_sound/led/availability" -m "offline" -r
     stop_music_visualizer
     rm -f "$GUARD_PID_FILE"
     exit 0
@@ -171,7 +346,10 @@ cleanup() {
 
 trap cleanup INT TERM EXIT HUP
 
-# 启动初始化: 检查当前状态
+# 启动初始化: 拉起 MQTT 守护后台
+start_mqtt_daemon
+
+# 检查当前播放状态
 current_st=$(get_play_status)
 if [ "$current_st" = "1" ]; then
     start_music_visualizer
@@ -195,6 +373,8 @@ else
     fi
 fi
 
+last_vmode=""
+
 while true; do
     status=$(get_play_status)
 
@@ -202,6 +382,23 @@ while true; do
         # 正在播放音乐
         if ! is_music_running; then
             start_music_visualizer
+        fi
+
+        # 监测自动轮换时的模式切变，向 HA 实时同步当前子模式
+        if [ -f /tmp/visualizer_mode ]; then
+            vmode_now=$(cat /tmp/visualizer_mode 2>/dev/null | head -n 1)
+            if [ -n "$vmode_now" ] && [ "$vmode_now" != "$last_vmode" ]; then
+                last_vmode="$vmode_now"
+                cur_disp=""
+                case "$vmode_now" in
+                    *"模式 1"*) cur_disp="模式 1: 双翼声学均衡器" ;;
+                    *"模式 2"*) cur_disp="模式 2: 重低音大动态立体声律动" ;;
+                    *"模式 3"*) cur_disp="模式 3: 彩虹熔岩流动" ;;
+                    *"模式 4"*) cur_disp="模式 4: 全频律动" ;;
+                    *) cur_disp="$vmode_now" ;;
+                esac
+                [ -n "$cur_disp" ] && mqtt_pub -t "xiaomi_sound/led/current_mode" -m "$cur_disp" -r
+            fi
         fi
     else
         # 音乐停止/暂停：如果律动正在跑，执行优雅谢幕动画
@@ -214,6 +411,12 @@ while true; do
             else
                 # 动画正常谢幕完成，恢复官方服务
                 stop_music_visualizer
+                if [ -f /data/led_mode ] && [ "$(cat /data/led_mode 2>/dev/null)" = "off" ]; then
+                    mqtt_pub -t "xiaomi_sound/led/current_mode" -m "已关闭" -r
+                else
+                    mqtt_pub -t "xiaomi_sound/led/current_mode" -m "待机 (官方交互)" -r
+                fi
+                last_vmode=""
             fi
         fi
     fi
