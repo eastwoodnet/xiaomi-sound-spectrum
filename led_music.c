@@ -660,59 +660,55 @@ static void render_lava(int *level_l, int *level_r) {
  * 物理与声学几何 (经过物理标定实测):
  * - 0 号位于音箱【最后面】(电源线插孔处)
  * - 8 与 9 号位于音箱【最前面】(小爱 Logo 处)
- * - 俯视顺时针方向: 0 -> 1 -> 2 -> ... -> 8 -> 9 -> ... -> 17 -> 0
+ * - 顺时针环形走向: 0(后) -> 1..7(左) -> 8,9(前) -> 10..16(右) -> 17(后)
  *
- * 18 频段声学与色彩映射 (55Hz ~ 20kHz 完美对应 18 颗灯珠):
- * - #0:  55 Hz   (LED 0,  最后面) -> 0°   (深红)
- * - #1:  77 Hz   (LED 1,  左侧)   -> 20°  (赤橙)
- * - #2:  110 Hz  (LED 2,  左侧)   -> 40°  (金橙)
- * - #3:  156 Hz  (LED 3,  左侧)   -> 60°  (琥珀黄)
- * - #4:  220 Hz  (LED 4,  左侧)   -> 80°  (黄绿)
- * - #5:  311 Hz  (LED 5,  左侧)   -> 100° (青绿)
- * - #6:  440 Hz  (LED 6,  左侧)   -> 120° (纯绿)
- * - #7:  622 Hz  (LED 7,  左侧)   -> 140° (碧绿)
- * - #8:  880 Hz  (LED 8,  最前左) -> 160° (青翠)
- * - #9:  1.2 kHz (LED 9,  最前右) -> 180° (赛博青)
- * - #10: 1.8 kHz (LED 10, 右侧)   -> 200° (天青蓝)
- * - #11: 2.5 kHz (LED 11, 右侧)   -> 220° (湛蓝)
- * - #12: 3.5 kHz (LED 12, 右侧)   -> 240° (正蓝)
- * - #13: 5.0 kHz (LED 13, 右侧)   -> 260° (靛蓝)
- * - #14: 7.0 kHz (LED 14, 右侧)   -> 280° (霓虹紫)
- * - #15: 10 kHz  (LED 15, 右侧)   -> 300° (洋红)
- * - #16: 14 kHz  (LED 16, 右侧)   -> 320° (玫瑰红)
- * - #17: 20 kHz  (LED 17, 最后面) -> 340° (深绯红，与 0 号闭合)
+ * 18 频段声学分配 (精准 1/3 倍频程等比对数划分):
+ * - #0:  ~47-94 Hz    (LED 0,  后)   -> 0°   (深红)      [Sub-bass / 808重低音]
+ * - #1:  ~94-141 Hz   (LED 1,  左)   -> 20°  (赤橙)      [底鼓打击力 Kick Punch]
+ * - #2:  ~141-188 Hz  (LED 2,  左)   -> 40°  (金橙)      [贝斯弹拨与军鼓基音]
+ * - #3:  ~188-281 Hz  (LED 3,  左)   -> 60°  (琥珀黄)    [温暖中低频 Low Mids]
+ * - #4:  ~281-375 Hz  (LED 4,  左)   -> 80°  (黄绿)      [男声下潜与鼓腔共振]
+ * - #5:  ~375-516 Hz  (LED 5,  左)   -> 100° (青绿)      [国际标准基音 A4 / 钢琴核心]
+ * - #6:  ~516-703 Hz  (LED 6,  左)   -> 120° (纯绿)      [主唱人声基频核心]
+ * - #7:  ~703-984 Hz  (LED 7,  左)   -> 140° (碧绿)      [人声共鸣与中频乐器]
+ * - #8:  ~984-1.36kHz (LED 8,  最前) -> 160° (青翠)      [人声黄金区 / 旋律核心 A5]
+ * - #9:  ~1.36-1.88k  (LED 9,  最前) -> 180° (赛博青)    [人声咬字清晰度 / 齿音上沿]
+ * - #10: ~1.88-2.58k  (LED 10, 右)   -> 200° (天青蓝)    [吉他失真泛音 / 军鼓脆响]
+ * - #11: ~2.58-3.61k  (LED 11, 右)   -> 220° (湛蓝)      [军鼓击打瞬态 / 瞬时咬合]
+ * - #12: ~3.61-5.02k  (LED 12, 右)   -> 240° (正蓝)      [人耳临界敏感区 Presence]
+ * - #13: ~5.02-6.98k  (LED 13, 右)   -> 260° (靛蓝)      [踩镲清晰度 / 金属打击]
+ * - #14: ~6.98-9.75k  (LED 14, 右)   -> 280° (霓虹紫)    [镲片泛音 / 明亮高频]
+ * - #15: ~9.75-13.6k  (LED 15, 右)   -> 300° (洋红)      [极高频通透度 Brilliance]
+ * - #16: ~13.6-17.8k  (LED 16, 右)   -> 320° (玫瑰红)    [吊镲空气感 Air Band]
+ * - #17: ~17.8-20.6k  (LED 17, 后)   -> 340° (深绯红)    [超高频声场空间延展, 与0号闭合]
  *
- * 峰值非线性动力学 (Peak Nonlinear Dynamics):
- * 1. 底噪与垫乐吸收门限 (Threshold = 32):
- *    平缓信号保持静止连续彩虹底光 (约 38% 亮度, val=95), 不熄灭、不随杂音抖动。
- * 2. 高阶非线性幂律爆发 (Quadratic Power Curve):
- *    冲过门限的强拍能量二次方放大, 彻底拉开动态对比。
- * 3. 峰值跃迁变色 (Peak Metamorphosis):
- *    色相大角度扭转 (+120°), 饱和度脱色白炽化, 巅峰 (>78) 混入纯白爆闪!
+ * 峰值非线性动力学:
+ * 1. 频段全自动动态校准 (去除非对称死锁门限, 彻底激活 0-8 低中频段)
+ * 2. 灵动响应门限 (Threshold = 18): 过滤极微弱底噪, 乐曲起伏即刻律动
+ * 3. 峰值跃迁变色 (+120° 大跨度跃迁, 饱和度脱色白炽化, >75 混入纯白爆闪)
  * ================================================================ */
 static const struct {
     int start_bin;
     int end_bin;
-    int min_diff;
 } BANDS_18[18] = {
-    {   1,   1, 3000 }, /* #0:  ~55 Hz   (Bin 1: 46.9 Hz) - Sub-Bass */
-    {   2,   2, 3000 }, /* #1:  ~77 Hz   (Bin 2: 93.8 Hz) - Kick Sub */
-    {   2,   3, 2800 }, /* #2:  ~110 Hz  (Bin 2-3: 94-141 Hz) - Kick Punch */
-    {   3,   4, 2500 }, /* #3:  ~156 Hz  (Bin 3-4: 141-188 Hz) - Body/Bass */
-    {   4,   6, 2200 }, /* #4:  ~220 Hz  (Bin 4-6: 188-281 Hz) - Low Mids / A3 */
-    {   6,   8, 2000 }, /* #5:  ~311 Hz  (Bin 6-8: 281-375 Hz) - Snare Body */
-    {   8,  11, 1800 }, /* #6:  ~440 Hz  (Bin 8-11: 375-516 Hz) - Standard A4 */
-    {  11,  16, 1600 }, /* #7:  ~622 Hz  (Bin 11-16: 516-750 Hz) - Vocal Fundamental */
-    {  16,  22, 1400 }, /* #8:  ~880 Hz  (Bin 16-22: 750-1031 Hz) - Vocal Core / A5 */
-    {  22,  32, 1200 }, /* #9:  ~1.2 kHz (Bin 22-32: 1031-1500 Hz) - Vocal Clarity */
-    {  32,  45, 1000 }, /* #10: ~1.8 kHz (Bin 32-45: 1500-2109 Hz) - Lead/Synth */
-    {  45,  64,  900 }, /* #11: ~2.5 kHz (Bin 45-64: 2109-3000 Hz) - Snare Crack */
-    {  64,  90,  800 }, /* #12: ~3.5 kHz (Bin 64-90: 3000-4219 Hz) - Presence Peak */
-    {  90, 128,  700 }, /* #13: ~5.0 kHz (Bin 90-128: 4219-6000 Hz) - High Presence */
-    { 128, 181,  600 }, /* #14: ~7.0 kHz (Bin 128-181: 6000-8484 Hz) - Cymbals/Shimmer */
-    { 181, 256,  500 }, /* #15: ~10.0 kHz (Bin 181-256: 8484-12000 Hz) - Hi-Hats */
-    { 256, 362,  400 }, /* #16: ~14.0 kHz (Bin 256-362: 12000-16969 Hz) - Air Band */
-    { 362, 440,  350 }  /* #17: ~20.0 kHz (Bin 362-440: 16969-20625 Hz) - Top Air */
+    {   1,   2 }, /* #0:  ~47 - 94 Hz    (Sub-bass & 808) */
+    {   2,   3 }, /* #1:  ~94 - 141 Hz   (Kick punch) */
+    {   3,   4 }, /* #2:  ~141 - 188 Hz  (Bass & snare body) */
+    {   4,   6 }, /* #3:  ~188 - 281 Hz  (Warm low-mids) */
+    {   6,   8 }, /* #4:  ~281 - 375 Hz  (Low mids / A3) */
+    {   8,  11 }, /* #5:  ~375 - 516 Hz  (Middle mids / A4) */
+    {  11,  15 }, /* #6:  ~516 - 703 Hz  (Vocal body) */
+    {  15,  21 }, /* #7:  ~703 - 984 Hz  (Vocal core) */
+    {  21,  29 }, /* #8:  ~984 - 1359 Hz (Vocal presence, 正面左 LED 8) */
+    {  29,  40 }, /* #9:  ~1.36k-1.88kHz (Vocal clarity, 正面右 LED 9) */
+    {  40,  55 }, /* #10: ~1.88k-2.58kHz (Guitar bite / snare snap) */
+    {  55,  77 }, /* #11: ~2.58k-3.61kHz (Presence peak) */
+    {  77, 107 }, /* #12: ~3.61k-5.02kHz (Attack & crispness) */
+    { 107, 149 }, /* #13: ~5.02k-6.98kHz (High presence) */
+    { 149, 208 }, /* #14: ~6.98k-9.75kHz (Cymbals / hi-hats) */
+    { 208, 290 }, /* #15: ~9.75k-13.6kHz (Brilliance & sibilance) */
+    { 290, 380 }, /* #16: ~13.6k-17.8kHz (Air band) */
+    { 380, 440 }  /* #17: ~17.8k-20.6kHz (Top air) */
 };
 
 static int high_18[18];
@@ -723,8 +719,8 @@ static int inited_18 = 0;
 static void render_spectrum(const int *left_mags, const int *right_mags) {
     if (!inited_18) {
         for (int i = 0; i < 18; i++) {
-            high_18[i] = BANDS_18[i].min_diff * 2;
-            low_18[i] = 100;
+            high_18[i] = 1000;
+            low_18[i] = 50;
             level_18[i] = 0;
         }
         inited_18 = 1;
@@ -739,15 +735,15 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
             if (right_mags[i] > max_e) max_e = right_mags[i];
         }
 
-        /* 自适应增益追踪 (Attack 即时, Decay 柔和) */
+        /* 自适应增益追踪: 慢速释放 (1/300) 保证峰值记忆，快速上升 */
         if (max_e > high_18[b]) high_18[b] = max_e;
-        else high_18[b] = (high_18[b] * 199 + max_e) / 200;
+        else high_18[b] = (high_18[b] * 299 + max_e) / 300;
 
         if (max_e < low_18[b]) low_18[b] = max_e;
-        else low_18[b] = (low_18[b] * 199 + max_e) / 200;
+        else low_18[b] = (low_18[b] * 299 + max_e) / 300;
 
         int diff = high_18[b] - low_18[b];
-        if (diff < BANDS_18[b].min_diff) diff = BANDS_18[b].min_diff;
+        if (diff < 200) diff = 200; /* 底噪保护，不再用 3000 卡死低频 */
 
         int raw = 0;
         if (max_e > low_18[b]) {
@@ -755,20 +751,21 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
             if (raw > 100) raw = 100;
         }
 
-        /* 快速捕捉瞬态，平滑释放 */
+        /* 快速捕捉瞬态 (Attack 瞬时), 平滑释放 (Decay ~12%/帧) */
         if (raw >= level_18[b]) level_18[b] = raw;
-        else level_18[b] = (level_18[b] * 84) / 100;
+        else level_18[b] = (level_18[b] * 88) / 100;
 
         int lev = level_18[b];
 
-        /* 峰值非线性门限过滤: lev < 32 属于底电平/伴奏背景，不触发律动抖动 */
+        /* 峰值非线性门限与扩展: lev < 18 保持彩虹底光, lev > 18 开始灵动律动 */
         int peak_act = 0;
-        if (lev > 32) {
-            int norm = ((lev - 32) * 100) / 68; /* 0 ~ 100 */
-            peak_act = (norm * norm) / 100;    /* 二次方非线性幂律放大 0 ~ 100 */
+        if (lev > 18) {
+            int norm = ((lev - 18) * 100) / 82; /* 0 ~ 100 */
+            peak_act = (norm * (norm + 40)) / 140; /* 平滑幂律扩展 0 ~ 100 */
+            if (peak_act > 100) peak_act = 100;
         }
 
-        /* 18 颗连续色谱基准色相: 360° 均匀分为 18 份，步长 20.0° (200) */
+        /* 18 颗连续色谱基准色相: 360° 均匀分为 18 份, 每步 20.0° (200) */
         int h_base = b * 200;
 
         /* 峰值触发色相向高能互补方向大角度跃迁 (+120.0°) */
@@ -778,9 +775,9 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
 
         /* 峰值脱色白炽化 */
         int sat = 245;
-        if (peak_act > 40) {
-            sat = 245 - ((peak_act - 40) * 155) / 60;
-            if (sat < 85) sat = 85;
+        if (peak_act > 35) {
+            sat = 245 - ((peak_act - 35) * 155) / 65;
+            if (sat < 80) sat = 80;
         }
 
         /* 亮度: 恒定温润底光 (95, ~38%) 保持彩虹环完整，峰值跃迁至 220 */
@@ -789,10 +786,10 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
 
         uint32_t color = hsv_to_bgr(h / 10, sat, val);
 
-        /* 强峰值瞬态白光爆闪 (>78) */
-        if (peak_act > 78) {
-            int white_mix = (peak_act - 78) * 4;
-            if (white_mix > 80) white_mix = 80;
+        /* 强峰值瞬态白光爆闪 (>75) */
+        if (peak_act > 75) {
+            int white_mix = (peak_act - 75) * 4;
+            if (white_mix > 85) white_mix = 85;
             color = blend_color(color, C_WHITE, white_mix);
         }
 
