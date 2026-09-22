@@ -73,17 +73,17 @@ send_ha_discovery() {
     
     # 1. 注册 Select 实体: 律动模式选择器
     local disc_select="homeassistant/select/xiaomi_sound_l06a/led_mode/config"
-    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-beta2"}}'
+    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-release"}}'
     mqtt_pub -t "$disc_select" -m "$payload_select" -r
 
     # 2. 注册 Switch 实体: 律动总开关
     local disc_switch="homeassistant/switch/xiaomi_sound_l06a/visualizer/config"
-    local payload_switch='{"name":"声光律动总开关","unique_id":"xiaomi_sound_l06a_visualizer_switch","command_topic":"xiaomi_sound/led/power/set","state_topic":"xiaomi_sound/led/power/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","payload_on":"ON","payload_off":"OFF","icon":"mdi:speaker-wireless","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-beta2"}}'
+    local payload_switch='{"name":"声光律动总开关","unique_id":"xiaomi_sound_l06a_visualizer_switch","command_topic":"xiaomi_sound/led/power/set","state_topic":"xiaomi_sound/led/power/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","payload_on":"ON","payload_off":"OFF","icon":"mdi:speaker-wireless","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-release"}}'
     mqtt_pub -t "$disc_switch" -m "$payload_switch" -r
 
     # 3. 注册 Sensor 实体: 当前运行律动 (实时显示实际运行模式或待机状态)
     local disc_sensor="homeassistant/sensor/xiaomi_sound_l06a/current_mode/config"
-    local payload_sensor='{"name":"当前运行律动","unique_id":"xiaomi_sound_l06a_current_mode","state_topic":"xiaomi_sound/led/current_mode","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:waveform","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-beta2"}}'
+    local payload_sensor='{"name":"当前运行律动","unique_id":"xiaomi_sound_l06a_current_mode","state_topic":"xiaomi_sound/led/current_mode","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:waveform","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-release"}}'
     mqtt_pub -t "$disc_sensor" -m "$payload_sensor" -r
 
     # 4. 初始上线通知 (Retained)
