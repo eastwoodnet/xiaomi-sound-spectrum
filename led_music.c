@@ -581,11 +581,11 @@ static void render_lava(int *level_l, int *level_r) {
         lava_initialized = 1;
     }
 
-    /* 低频 (Band 0+1) 驱动旋转速度 */
+    /* 低频 (Band 0+1) 驱动旋转速度 (23.44 FPS 步长适配) */
     int bass_l = (level_l[0] * 2 + level_l[1]) / 3;
     int bass_r = (level_r[0] * 2 + level_r[1]) / 3;
     int bass = (bass_l + bass_r) / 2;
-    int base_speed = 3 + bass / 8;  /* 3 ~ 15 (单位: 0.1度/帧) */
+    int base_speed = (3 + bass / 8) * 2;  /* 6 ~ 30 (单位: 0.1度/帧，维持角速度恒定) */
 
     /* 中频 (Band 2-5) 影响饱和度 */
     int mid_energy = (level_l[2] + level_r[2] + level_l[3] + level_r[3]
@@ -873,6 +873,9 @@ static short left_samples[FFT_N];
 static short right_samples[FFT_N];
 static int left_mags[FFT_N >> 1];
 static int right_mags[FFT_N >> 1];
+static int temp_left[FFT_N >> 1];
+static int temp_right[FFT_N >> 1];
+static int sub_frame = 0;
 
 /* 状态枚举 */
 #define STATE_STOPPED 0
@@ -1006,6 +1009,7 @@ void main_loop(long argc, char **argv) {
         }
 
         if (state == STATE_STOPPED) {
+            sub_frame = 0;
             if (last_state != STATE_STOPPED) {
                 set_all_leds(C_BLACK);
                 flush_leds(fd_led, 1);
@@ -1019,6 +1023,7 @@ void main_loop(long argc, char **argv) {
         }
 
         if (state == STATE_PAUSED) {
+            sub_frame = 0;
             if (last_state != STATE_PAUSED) {
                 set_all_leds(C_BASE);
                 flush_leds(fd_led, 1);
@@ -1036,10 +1041,22 @@ void main_loop(long argc, char **argv) {
         last_state = STATE_PLAYING;
 
         /* -------------------------------------------------------------
-         * 5. 左右声道独立执行 1024 点 FFT
+         * 5. 左右声道独立执行 1024 点 FFT (2 帧瞬态峰值聚合: 46.88 / 2 = 23.44 FPS)
          * ------------------------------------------------------------- */
-        fft_1024(left_samples, left_mags);
-        fft_1024(right_samples, right_mags);
+        if (sub_frame == 0) {
+            fft_1024(left_samples, left_mags);
+            fft_1024(right_samples, right_mags);
+            sub_frame = 1;
+            continue; /* 立即读取下半帧 1024 点，合并峰值包络后再渲染点灯 */
+        } else {
+            fft_1024(left_samples, temp_left);
+            fft_1024(right_samples, temp_right);
+            for (int i = 0; i < (FFT_N >> 1); i++) {
+                if (temp_left[i] > left_mags[i]) left_mags[i] = temp_left[i];
+                if (temp_right[i] > right_mags[i]) right_mags[i] = temp_right[i];
+            }
+            sub_frame = 0;
+        }
 
         /* -------------------------------------------------------------
          * 6. 多频段 AGC 自适应包络提取 (Attack 瞬时, Decay 柔和)
@@ -1096,10 +1113,10 @@ void main_loop(long argc, char **argv) {
             else total_treble += (level_l[b] + level_r[b]);
         }
 
-        /* 模式轮换计时 */
+        /* 模式轮换计时 (23.44 FPS 下 1400 帧约为 60 秒) */
         if (auto_cycle) {
             mode_frame_counter++;
-            if (mode_frame_counter >= 2800) { /* ~60秒轮换 */
+            if (mode_frame_counter >= 1400) { /* ~60秒轮换 */
                 mode_frame_counter = 0;
                 current_mode = (current_mode >= 4) ? 1 : current_mode + 1;
                 log_mode(current_mode);
@@ -1176,12 +1193,12 @@ void main_loop(long argc, char **argv) {
             if (target_r > spread_r) spread_r = target_r;
             else if (target_r < spread_r) spread_r--;
 
-            /* Peak-Hold 峰值悬停 */
-            if (spread_l > peak_l) { peak_l = spread_l; peak_hold_l = 10; }
+            /* Peak-Hold 峰值悬停 (23.44 FPS 下 5 帧约为 213ms) */
+            if (spread_l > peak_l) { peak_l = spread_l; peak_hold_l = 5; }
             else if (peak_hold_l > 0) peak_hold_l--;
             else if (peak_l > 0) peak_l--;
 
-            if (spread_r > peak_r) { peak_r = spread_r; peak_hold_r = 10; }
+            if (spread_r > peak_r) { peak_r = spread_r; peak_hold_r = 5; }
             else if (peak_hold_r > 0) peak_hold_r--;
             else if (peak_r > 0) peak_r--;
 
