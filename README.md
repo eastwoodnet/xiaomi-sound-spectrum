@@ -1,4 +1,4 @@
-# 小米 Sound (L06A) 音乐声光律动系统 (v1.0 Release)
+# 小米 Sound (L06A) 音乐声光律动系统 (v1.1-beta)
 
 [English](README_EN.md) | 简体中文
 
@@ -16,7 +16,27 @@
 
 ---
 
-## 📝 v1.0 Release 重大里程碑更新说明 (Changelog)
+## 📝 v1.1-beta 重要更新说明 (Changelog)
+
+- **🎨 动态调色板系统与主题切换 (Dynamic Palettes & Themes)**：
+  - **算法与色彩完全解耦**：新增独立调色配置文件 `/data/palettes.conf`，全面采用人类标准 `#RRGGBB` 十六进制色码；
+  - **内置 5 套经典声光主题风格**：
+    - `rainbow`: 🌈 **经典全彩光谱**（声学高保真频段映射）
+    - `cyberpunk`: 🌆 **赛博朋克霓虹**（粉紫 + 极电明青 + 白炽峰值）
+    - `ocean`: 🌊 **深海冰蓝**（深夜魅蓝 + 蔚蓝天空 + 翡翠海浪）
+    - `fire`: 🔥 **炽热烈焰**（重构纯火火海：血月猩红 + 纯火大红 + 烈阳赤橙 + 琥珀金核，红焰占比 >80%）
+    - `aurora`: 🌌 **极光秘境**（荧光青翠 + 碧水青绿 + 极光幽紫）
+    - `custom`: 🎨 **自定义调色板**（极客专属，支持自由设定每个频段、每颗灯珠及色相流体）
+  - **毫秒级无缝热重载 (Hot-Reload)**：修改配置后执行 `touch /tmp/reload_palette`，800ms 内静默重新加载，**音乐播放与录音采样完全不中断**。
+- **🏠 Home Assistant 主题选择器集成**：
+  - 新增 MQTT Discovery 实体：`select.xiaomi_sound_l06a_theme`（声光主题风格），支持在 HA 界面中下拉一键秒级切主题。
+- **🎬 24 FPS 电影级刷新率与非对称时间阻尼平滑滤波 (Anti-Flicker Damping)**：
+  - 刷新率由原先 46.88 FPS 降频重构为 23.44 FPS（每 2 个音频捕获周期聚合输出 1 帧最大瞬态值），**大幅消除人眼视觉频闪与疲劳感**；
+  - 引入上升极速响应 (Attack 0ms)、下降缓释平滑 (Decay ~88%) 的**非对称时间阻尼滤波器**，使光柱起伏与流动如水银般丝滑稳重。
+
+---
+
+## 📝 v1.0 Release 历史里程碑更新说明 (Changelog)
 
 - **四大专业级声光律动模式正式定型**：
   - 模式 1: 双翼 8 频段真·声学均衡器 (纯硬件 FFT 驱动)；
@@ -85,6 +105,7 @@
 | 实体类型 | 实体 ID | 功能与作用 |
 | :--- | :--- | :--- |
 | **Select (选择器)** | `select.xiaomi_sound_l06a_led_mode` | 下拉切换模式：`自动轮换`、`模式 1`、`模式 2`、`模式 3`、`模式 4`、`关闭律动 (恢复官方)` |
+| **Select (选择器)** | `select.xiaomi_sound_l06a_led_theme` | 下拉切换主题风格：`🌈 经典彩虹`、`🌆 赛博朋克`、`🌊 深海冰蓝`、`🔥 炽热烈焰`、`🌌 极光秘境`、`🎨 自定义调色` |
 | **Switch (开关)** | `switch.xiaomi_sound_l06a_visualizer_switch` | 律动总开关：控制律动引擎开启（ON）或恢复官方状态（OFF） |
 | **Sensor (传感器)** | `sensor.xiaomi_sound_l06a_current_mode` | 实时状态：动态显示当前音箱真实运行的子模式（如 `模式 4: 全频律动`）或 `待机 (官方交互)` |
 
@@ -124,17 +145,80 @@ MQTT_ENABLED="1"
 | `xiaomi_sound/led/state` | 音箱 $\to$ HA | 回传当前设定模式（Retained 保持消息） |
 | `xiaomi_sound/led/power/set` | HA $\to$ 音箱 | 下发开关指令（`ON` / `OFF`） |
 | `xiaomi_sound/led/power/state` | 音箱 $\to$ HA | 回传总开关状态（`ON` / `OFF`，Retained） |
+| `xiaomi_sound/led/theme/set` | HA $\to$ 音箱 | 下发主题风格切换（如 `cyberpunk`, `fire`, `aurora`, `rainbow`, `ocean`, `custom`） |
+| `xiaomi_sound/led/theme/state` | 音箱 $\to$ HA | 回传当前声光主题风格（Retained） |
 | `xiaomi_sound/led/current_mode` | 音箱 $\to$ HA | 实时物理运行子模式状态（Retained） |
 | `xiaomi_sound/led/availability` | 音箱 $\to$ HA | 遗嘱与在线状态（`online` / `offline`，Retained） |
+
+---
+
+## 🎨 调色板与主题配置指南 (`/data/palettes.conf`)
+
+本项目支持高度模块化的色彩定制引擎，配置文件位于音箱内部 **`/data/palettes.conf`**，色彩全面支持人类直观的标准 **`#RRGGBB`** 十六进制代码。
+
+### 1. 全局预设主题 (THEME)
+绝大多数用户直接在 Home Assistant 界面下拉或在配置文件中修改 `THEME` 即可：
+
+```ini
+THEME = aurora   # 可选: rainbow / cyberpunk / ocean / fire / aurora / custom
+```
+
+| 主题代码 | 主题名称 | 风格特征 | 模式 3 专属流动意境 |
+| :--- | :--- | :--- | :--- |
+| **`rainbow`** | 🌈 经典彩虹 | 默认全彩光谱，高保真频段声学映射 | 0° ~ 360° 全谱彩虹行波旋转 |
+| **`cyberpunk`** | 🌆 赛博朋克 | 霓虹粉紫 + 魅影深紫 + 极电明青 | 180° ~ 320° 赛博明青至霓虹粉紫液态波 |
+| **`ocean`** | 🌊 深海冰蓝 | 深夜魅蓝 $\to$ 蔚蓝天空 $\to$ 翡翠海浪 | 160° ~ 240° 深海幽蓝极地冰浪流 |
+| **`fire`** | 🔥 炽热烈焰 | 血月猩红 $\to$ 纯火大红 $\to$ 烈阳火橙 $\to$ 琥珀金 | 0° ~ 28° 纯正猩红火山岩浆滚涌 |
+| **`aurora`** | 🌌 极光秘境 | 荧光翠绿 $\to$ 碧青绿 $\to$ 极光幽紫 | 90° ~ 280° 翠绿/碧青/幽紫深空极光流体 |
+| **`custom`** | 🎨 自定义调色 | 极客专属，加载下方自定义各个模式配置 | 由配置文件中的 `MODE3_HUE_MIN` 与 `MAX` 决定 |
+
+### 2. 极客高级自定义调色 (当 `THEME = custom` 时生效)
+如果您对色彩有独特的审美追求，只需将 `THEME = custom`，随后即可自由定制各个模式的每个频段与灯珠色温：
+
+```ini
+# [模式 1: 双翼 8 频段声学均衡器] (左翼与右翼对称，由低音到高音)
+MODE1_BAND0 = #FF0020   # 频段 0: 超低音 (Sub-Bass)
+MODE1_BAND1 = #FF4500   # 频段 1: 低音瞬态 (Bass Punch)
+MODE1_BAND2 = #FFB500   # 频段 2: 中低频 (Low Mids)
+MODE1_BAND3 = #30FF00   # 频段 3: 核心中频人声 (Midrange)
+MODE1_BAND4 = #00FFFF   # 频段 4: 中高频泛音 (High Mids)
+MODE1_BAND5 = #0075FF   # 频段 5: 存在打击感 (Presence)
+MODE1_BAND6 = #5000FF   # 频段 6: 明亮高频 (Treble)
+MODE1_BAND7 = #FF40FF   # 频段 7: 极高频空气感 (Air)
+MODE1_TOP_BASS   = #FF0010   # 顶部 LED 0 纯正超低音鼓爆发脉冲色
+MODE1_BOT_TREBLE = #FFFFFF   # 底部 LED 9 极高频瞬态碰撞高光色
+
+# [模式 2: 重低音大动态立体声律动] (动态能量质心色温)
+MODE2_BASS_COLOR   = #FF0010   # 重低音爆发主导色
+MODE2_MID_COLOR    = #FF2800   # 中频主唱副歌主导色
+MODE2_TREBLE_COLOR = #FF8000   # 明亮高频激昂主导色
+MODE2_PEAK_COLOR   = #FFF8E0   # 悬停峰值点颜色 (建议高亮白炽色)
+MODE2_BG_COLOR     = #180002   # 待机暗夜微光底色 (避免全黑频闪)
+
+# [模式 3: 熔岩流体流动] (HSV 色相区间: 0-3600，3600 对应 360 度圆周)
+MODE3_HUE_MIN = 1600   # 起始色相 (如 1600 对应天青色)
+MODE3_HUE_MAX = 2400   # 截止色相 (如 2400 对应深海蓝)
+
+# [模式 4: 全频 18 频段基准配色环] (顺时针 18 颗灯珠基准色，逗号分隔 18 个 #RRGGBB)
+MODE4_COLORS = #FF0000, #FF3000, #FF6000, #FFA000, #FFD000, #A0FF00, #00FF30, #00FF90, #00FFE0, #00E0FF, #0090FF, #0040FF, #2000FF, #7000FF, #C000FF, #FF00E0, #FF0080, #FF0030
+```
+
+### 3. 毫秒级即时热重载生效 (Hot-Reload)
+修改完 `/data/palettes.conf` 后，**无需重启程序，无需重启音箱，音乐更不会中断**！直接在音箱终端执行：
+```sh
+touch /tmp/reload_palette
+```
+律动引擎将在约 800ms 内静默重载新调色板并自动清除触发文件，声光色彩即时平滑蜕变！
 
 ---
 
 ## 📁 目录文件清单
 
 ```text
-├── led_music.c         # 原生 aarch64 C 语言律动引擎 (ALSA 硬件流 + 1024点 FFT)
+├── led_music.c         # 原生 aarch64 C 语言律动引擎 (ALSA 硬件流 + 1024点 FFT + 动态调色板)
 ├── led_guard.sh        # 智能动态声光律动守护服务 (ubus 探测 + HA MQTT 客户端)
 ├── mqtt.conf           # Home Assistant MQTT 远端控制配置文件模板
+├── palettes.conf       # 调色板与主题风格配置文件模板 (支持人类友好 #RRGGBB)
 ├── build.sh            # 宿主机交叉编译脚本 (基于 Clang/LLD，纯静态编译)
 ├── deploy.py           # 宿主机一键部署脚本 (自动化 SSH 部署、配置文件分发与开机自启)
 ├── EFFECTS.md          # 详细四大声光律动算法与声学设计文档

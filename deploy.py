@@ -122,6 +122,27 @@ def deploy():
                 chan.close()
                 print("[+] MQTT 配置文件 /data/mqtt.conf 创建完毕。")
 
+        # 检查并上传调色板配置文件
+        pal_path = os.path.join(os.path.dirname(__file__), "palettes.conf")
+        if os.path.exists(pal_path):
+            chan = transport.open_session()
+            chan.exec_command("[ -f /data/palettes.conf ] && echo EXISTS || echo NO")
+            res = chan.makefile().read().decode().strip()
+            chan.close()
+            if res == "EXISTS":
+                print("[i] 音箱已存在 /data/palettes.conf，保留当前调色板配置不变。")
+            else:
+                print("[*] 正在上传默认调色板配置文件 palettes.conf 到音箱 /data/palettes.conf ...")
+                with open(pal_path, "rb") as f:
+                    pal_content = f.read()
+                chan = transport.open_session()
+                chan.exec_command("cat > /data/palettes.conf")
+                chan.sendall(pal_content)
+                chan.shutdown_write()
+                time.sleep(1)
+                chan.close()
+                print("[+] 调色板配置文件 /data/palettes.conf 创建完毕。")
+
         # 上传守护脚本
         guard_path = os.path.join(os.path.dirname(__file__), "led_guard.sh")
         if os.path.exists(guard_path):
