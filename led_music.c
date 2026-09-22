@@ -491,6 +491,7 @@ static inline int color_diff(uint32_t c1, uint32_t c2) {
 
 /* 硬件显存缓存与差量提交 */
 static uint32_t current_colors[18];
+static uint32_t smooth_colors[18];
 static uint32_t last_colors[18];
 
 static inline int fmt_led_cmd(char *buf, int idx, uint32_t color) {
@@ -516,19 +517,91 @@ static inline int fmt_led_cmd(char *buf, int idx, uint32_t color) {
     return (int)(p - buf);
 }
 
+/* 非对称自适应时域平滑阻尼滤波器 (Slew-Rate Damping)
+ * Attack (起笔响应): 75% 单步逼近，保证节拍卡点紧凑敏锐
+ * Decay  (收笔衰减): 38% 指数柔退，彻底消除断崖式频闪与尖锐跳变
+ */
+static inline void apply_smooth_damping(int force) {
+    if (force) {
+        for (int i = 0; i < 18; i++) smooth_colors[i] = current_colors[i];
+        return;
+    }
+    for (int i = 0; i < 18; i++) {
+        uint32_t target = current_colors[i];
+        uint32_t cur = smooth_colors[i];
+
+        int tb = (int)((target >> 16) & 0xFF);
+        int tg = (int)((target >> 8) & 0xFF);
+        int tr = (int)(target & 0xFF);
+
+        int cb = (int)((cur >> 16) & 0xFF);
+        int cg = (int)((cur >> 8) & 0xFF);
+        int cr = (int)(cur & 0xFF);
+
+        int nb, ng, nr;
+
+        /* Blue 通道 */
+        if (tb > cb) {
+            int d = ((tb - cb) * 75) / 100;
+            nb = cb + (d > 0 ? d : 1);
+            if (nb > tb) nb = tb;
+        } else if (tb < cb) {
+            int d = ((cb - tb) * 38) / 100;
+            nb = cb - (d > 0 ? d : 1);
+            if (nb < tb) nb = tb;
+        } else {
+            nb = tb;
+        }
+
+        /* Green 通道 */
+        if (tg > cg) {
+            int d = ((tg - cg) * 75) / 100;
+            ng = cg + (d > 0 ? d : 1);
+            if (ng > tg) ng = tg;
+        } else if (tg < cg) {
+            int d = ((cg - tg) * 38) / 100;
+            ng = cg - (d > 0 ? d : 1);
+            if (ng < tg) ng = tg;
+        } else {
+            ng = tg;
+        }
+
+        /* Red 通道 */
+        if (tr > cr) {
+            int d = ((tr - cr) * 75) / 100;
+            nr = cr + (d > 0 ? d : 1);
+            if (nr > tr) nr = tr;
+        } else if (tr < cr) {
+            int d = ((cr - tr) * 38) / 100;
+            nr = cr - (d > 0 ? d : 1);
+            if (nr < tr) nr = tr;
+        } else {
+            nr = tr;
+        }
+
+        smooth_colors[i] = ((uint32_t)(nb & 0xFF) << 16) |
+                           ((uint32_t)(ng & 0xFF) << 8)  |
+                           ((uint32_t)(nr & 0xFF));
+    }
+}
+
 static inline void flush_leds(int fd_led, int force) {
     char buf[32];
     for (int i = 0; i < 18; i++) {
-        if (force || color_diff(current_colors[i], last_colors[i]) >= 6) {
-            int len = fmt_led_cmd(buf, i, current_colors[i]);
+        uint32_t col = smooth_colors[i];
+        if (force || (col == 0 && last_colors[i] != 0) || color_diff(col, last_colors[i]) >= 4) {
+            int len = fmt_led_cmd(buf, i, col);
             sys_write(fd_led, buf, len);
-            last_colors[i] = current_colors[i];
+            last_colors[i] = col;
         }
     }
 }
 
 static inline void set_all_leds(uint32_t color) {
-    for (int i = 0; i < 18; i++) current_colors[i] = color;
+    for (int i = 0; i < 18; i++) {
+        current_colors[i] = color;
+        smooth_colors[i] = color;
+    }
 }
 
 /* ================================================================
@@ -911,6 +984,7 @@ void main_loop(long argc, char **argv) {
     int fd_led = sys_openat(AT_FDCWD, PATH_LED_RGB, O_WRONLY, 0);
     for (int i = 0; i < 18; i++) {
         current_colors[i] = C_BLACK;
+        smooth_colors[i] = C_BLACK;
         last_colors[i] = 0xFFFFFFFF;
     }
     flush_leds(fd_led, 1);
@@ -1263,7 +1337,10 @@ void main_loop(long argc, char **argv) {
             render_spectrum(left_mags, right_mags);
         }
 
-        /* 提交差量 I2C 硬件写入 (Deadband >= 6) */
+        /* 提交非对称平滑阻尼 (Attack 75% 敏锐, Decay 38% 柔退) */
+        apply_smooth_damping(0);
+
+        /* 提交差量 I2C 硬件写入 (Deadband >= 4) */
         flush_leds(fd_led, 0);
     }
 }
