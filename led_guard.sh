@@ -44,8 +44,14 @@ start_music_visualizer() {
         # 1. 停止官方 LED 交互服务并确保杀死残留
         /etc/init.d/led stop 2>/dev/null
         killall -9 ledserver 2>/dev/null
-        # 2. 启动原生 1024点 FFT 音乐律动
-        start-stop-daemon -S -b -m -p /tmp/led_music.pid -x "$MUSIC_BIN" -- auto
+        # 2. 检查模式配置 (默认为 auto 每分钟自动轮换四种模式)
+        local target_mode="auto"
+        if [ -f /data/led_mode ]; then
+            target_mode=$(cat /data/led_mode | tr -d ' \n\r')
+        fi
+        [ -z "$target_mode" ] && target_mode="auto"
+        # 3. 启动原生 1024点 FFT 音乐律动
+        start-stop-daemon -S -b -m -p /tmp/led_music.pid -x "$MUSIC_BIN" -- "$target_mode"
     fi
 }
 

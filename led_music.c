@@ -690,25 +690,26 @@ static void render_lava(int *level_l, int *level_r) {
 static const struct {
     int start_bin;
     int end_bin;
+    int min_diff;
 } BANDS_18[18] = {
-    {   1,   2 }, /* #0:  ~47 - 94 Hz    (Sub-bass & 808) */
-    {   2,   3 }, /* #1:  ~94 - 141 Hz   (Kick punch) */
-    {   3,   4 }, /* #2:  ~141 - 188 Hz  (Bass & snare body) */
-    {   4,   6 }, /* #3:  ~188 - 281 Hz  (Warm low-mids) */
-    {   6,   8 }, /* #4:  ~281 - 375 Hz  (Low mids / A3) */
-    {   8,  11 }, /* #5:  ~375 - 516 Hz  (Middle mids / A4) */
-    {  11,  15 }, /* #6:  ~516 - 703 Hz  (Vocal body) */
-    {  15,  21 }, /* #7:  ~703 - 984 Hz  (Vocal core) */
-    {  21,  29 }, /* #8:  ~984 - 1359 Hz (Vocal presence, 正面左 LED 8) */
-    {  29,  40 }, /* #9:  ~1.36k-1.88kHz (Vocal clarity, 正面右 LED 9) */
-    {  40,  55 }, /* #10: ~1.88k-2.58kHz (Guitar bite / snare snap) */
-    {  55,  77 }, /* #11: ~2.58k-3.61kHz (Presence peak) */
-    {  77, 107 }, /* #12: ~3.61k-5.02kHz (Attack & crispness) */
-    { 107, 149 }, /* #13: ~5.02k-6.98kHz (High presence) */
-    { 149, 208 }, /* #14: ~6.98k-9.75kHz (Cymbals / hi-hats) */
-    { 208, 290 }, /* #15: ~9.75k-13.6kHz (Brilliance & sibilance) */
-    { 290, 380 }, /* #16: ~13.6k-17.8kHz (Air band) */
-    { 380, 440 }  /* #17: ~17.8k-20.6kHz (Top air) */
+    {   1,   1, 3000 }, /* #0:  ~55 Hz   (Bin 1: 46.9 Hz) - Sub-Bass */
+    {   2,   2, 3000 }, /* #1:  ~77 Hz   (Bin 2: 93.8 Hz) - Kick Sub */
+    {   2,   3, 2800 }, /* #2:  ~110 Hz  (Bin 2-3: 94-141 Hz) - Kick Punch */
+    {   3,   4, 2500 }, /* #3:  ~156 Hz  (Bin 3-4: 141-188 Hz) - Body/Bass */
+    {   4,   6, 2200 }, /* #4:  ~220 Hz  (Bin 4-6: 188-281 Hz) - Low Mids / A3 */
+    {   6,   8, 2000 }, /* #5:  ~311 Hz  (Bin 6-8: 281-375 Hz) - Snare Body */
+    {   8,  11, 1800 }, /* #6:  ~440 Hz  (Bin 8-11: 375-516 Hz) - Standard A4 */
+    {  11,  16, 1600 }, /* #7:  ~622 Hz  (Bin 11-16: 516-750 Hz) - Vocal Fundamental */
+    {  16,  22, 1400 }, /* #8:  ~880 Hz  (Bin 16-22: 750-1031 Hz) - Vocal Core / A5 */
+    {  22,  32, 1200 }, /* #9:  ~1.2 kHz (Bin 22-32: 1031-1500 Hz) - Vocal Clarity */
+    {  32,  45, 1000 }, /* #10: ~1.8 kHz (Bin 32-45: 1500-2109 Hz) - Lead/Synth */
+    {  45,  64,  900 }, /* #11: ~2.5 kHz (Bin 45-64: 2109-3000 Hz) - Snare Crack */
+    {  64,  90,  800 }, /* #12: ~3.5 kHz (Bin 64-90: 3000-4219 Hz) - Presence Peak */
+    {  90, 128,  700 }, /* #13: ~5.0 kHz (Bin 90-128: 4219-6000 Hz) - High Presence */
+    { 128, 181,  600 }, /* #14: ~7.0 kHz (Bin 128-181: 6000-8484 Hz) - Cymbals/Shimmer */
+    { 181, 256,  500 }, /* #15: ~10.0 kHz (Bin 181-256: 8484-12000 Hz) - Hi-Hats */
+    { 256, 362,  400 }, /* #16: ~14.0 kHz (Bin 256-362: 12000-16969 Hz) - Air Band */
+    { 362, 440,  350 }  /* #17: ~20.0 kHz (Bin 362-440: 16969-20625 Hz) - Top Air */
 };
 
 static int high_18[18];
@@ -719,8 +720,8 @@ static int inited_18 = 0;
 static void render_spectrum(const int *left_mags, const int *right_mags) {
     if (!inited_18) {
         for (int i = 0; i < 18; i++) {
-            high_18[i] = 1000;
-            low_18[i] = 50;
+            high_18[i] = BANDS_18[i].min_diff * 2;
+            low_18[i] = 100;
             level_18[i] = 0;
         }
         inited_18 = 1;
@@ -735,15 +736,15 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
             if (right_mags[i] > max_e) max_e = right_mags[i];
         }
 
-        /* 自适应增益追踪: 慢速释放 (1/300) 保证峰值记忆，快速上升 */
+        /* 自适应增益追踪 (Attack 即时, Decay 柔和) */
         if (max_e > high_18[b]) high_18[b] = max_e;
-        else high_18[b] = (high_18[b] * 299 + max_e) / 300;
+        else high_18[b] = (high_18[b] * 199 + max_e) / 200;
 
         if (max_e < low_18[b]) low_18[b] = max_e;
-        else low_18[b] = (low_18[b] * 299 + max_e) / 300;
+        else low_18[b] = (low_18[b] * 199 + max_e) / 200;
 
         int diff = high_18[b] - low_18[b];
-        if (diff < 200) diff = 200; /* 底噪保护，不再用 3000 卡死低频 */
+        if (diff < BANDS_18[b].min_diff) diff = BANDS_18[b].min_diff;
 
         int raw = 0;
         if (max_e > low_18[b]) {
@@ -751,21 +752,20 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
             if (raw > 100) raw = 100;
         }
 
-        /* 快速捕捉瞬态 (Attack 瞬时), 平滑释放 (Decay ~12%/帧) */
+        /* 快速捕捉瞬态，平滑释放 */
         if (raw >= level_18[b]) level_18[b] = raw;
-        else level_18[b] = (level_18[b] * 88) / 100;
+        else level_18[b] = (level_18[b] * 84) / 100;
 
         int lev = level_18[b];
 
-        /* 峰值非线性门限与扩展: lev < 18 保持彩虹底光, lev > 18 开始灵动律动 */
+        /* 峰值非线性门限过滤: lev < 32 属于底电平/伴奏背景，不触发律动抖动 */
         int peak_act = 0;
-        if (lev > 18) {
-            int norm = ((lev - 18) * 100) / 82; /* 0 ~ 100 */
-            peak_act = (norm * (norm + 40)) / 140; /* 平滑幂律扩展 0 ~ 100 */
-            if (peak_act > 100) peak_act = 100;
+        if (lev > 32) {
+            int norm = ((lev - 32) * 100) / 68; /* 0 ~ 100 */
+            peak_act = (norm * norm) / 100;    /* 二次方非线性幂律放大 0 ~ 100 */
         }
 
-        /* 18 颗连续色谱基准色相: 360° 均匀分为 18 份, 每步 20.0° (200) */
+        /* 18 颗连续色谱基准色相: 360° 均匀分为 18 份，步长 20.0° (200) */
         int h_base = b * 200;
 
         /* 峰值触发色相向高能互补方向大角度跃迁 (+120.0°) */
@@ -775,9 +775,9 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
 
         /* 峰值脱色白炽化 */
         int sat = 245;
-        if (peak_act > 35) {
-            sat = 245 - ((peak_act - 35) * 155) / 65;
-            if (sat < 80) sat = 80;
+        if (peak_act > 40) {
+            sat = 245 - ((peak_act - 40) * 155) / 60;
+            if (sat < 85) sat = 85;
         }
 
         /* 亮度: 恒定温润底光 (95, ~38%) 保持彩虹环完整，峰值跃迁至 220 */
@@ -786,14 +786,16 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
 
         uint32_t color = hsv_to_bgr(h / 10, sat, val);
 
-        /* 强峰值瞬态白光爆闪 (>75) */
-        if (peak_act > 75) {
-            int white_mix = (peak_act - 75) * 4;
-            if (white_mix > 85) white_mix = 85;
+        /* 强峰值瞬态白光爆闪 (>78) */
+        if (peak_act > 78) {
+            int white_mix = (peak_act - 78) * 4;
+            if (white_mix > 80) white_mix = 80;
             color = blend_color(color, C_WHITE, white_mix);
         }
 
-        current_colors[b] = color;
+        /* 逆时针旋转 90 度 (4 颗灯珠偏移): 将高动态活跃区对称居中移至正前方 (8, 9 号灯珠) */
+        int target_led = (b - 4 + 18) % 18;
+        current_colors[target_led] = color;
     }
 }
 
@@ -810,7 +812,7 @@ static void log_mode(int mode) {
             static const char m[] = "模式 3: 彩虹熔岩流动 (HSV 色相行波)\n";
             sys_write(fd, m, sizeof(m) - 1);
         } else {
-            static const char m[] = "模式 4: 18 频段连续色谱 (峰值非线性动力学)\n";
+            static const char m[] = "模式 4: 全频律动 (18 频段连续色谱与峰值动力学)\n";
             sys_write(fd, m, sizeof(m) - 1);
         }
         sys_close(fd);
