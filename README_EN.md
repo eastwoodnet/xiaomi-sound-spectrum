@@ -60,10 +60,12 @@ An ultra-low-latency music visualizer for the **Xiaomi Xiaoai Smart Speaker (Mod
 
 | Mode | Name | Description |
 | :---: | :--- | :--- |
-| **Mode 1** *(Default)* | **Stereo 8-Band Equalizer** | • **Left Wing (LED 1~8)**: Maps 8 acoustic bands on the left channel from sub-bass to air (Red $\to$ Orange $\to$ Yellow $\to$ Green $\to$ Cyan $\to$ Blue $\to$ Purple)<br>• **Right Wing (LED 17~10)**: Symmetrical right-channel frequency mapping<br>• **Top (LED 0)**: Sub-bass kick impact beat drop<br>• **Bottom (LED 9)**: High-frequency transient shimmer |
+| **Mode 1** | **Stereo 8-Band Equalizer** | • **Left Wing (LED 1~8)**: Maps 8 acoustic bands on the left channel from sub-bass to air (Red $\to$ Orange $\to$ Yellow $\to$ Green $\to$ Cyan $\to$ Blue $\to$ Purple)<br>• **Right Wing (LED 17~10)**: Symmetrical right-channel frequency mapping<br>• **Top (LED 0)**: Sub-bass kick impact beat drop<br>• **Bottom (LED 9)**: High-frequency transient shimmer |
 | **Mode 2** | **Full-Ring Bass Pulse** | • **Symmetrical Spread**: Bass pulse expands downward from LED 0<br>• **Dynamic Spectral Centroid**: Shifts color temperature based on audio energy (Fiery red for bass-heavy, electric blue for highs, emerald green for vocal melodies)<br>• **DAW Peak-Hold**: Top peak indicators hover for ~170ms before smooth decay |
+| **Mode 3** | **Rainbow Lava Wave** | • **HSV Phase Shift Wave**: Partial differential phase-coupling propagation, liquid aurora-like flow<br>• **Multi-Band Modulation**: Bass drives continuous rotation, mid-frequencies modulate saturation, highs trigger subtle shimmer sparkles<br>• **Calm & Healing**: Perfect for acoustic, ambient, and jazz with zero eye strain |
+| **Mode 4** *(Recommended)* | **Full-Spectrum Dynamics** | • **18-Band Chromatic Spectrum**: 1/3-octave log distribution (55Hz~20kHz) covering all 18 LEDs<br>• **Peak Nonlinear Dynamics**: Threshold noise gate + quadratic power expansion, smooth ambient baseline with explosive peak bloom<br>• **90° CCW Acoustic Alignment**: High-energy dynamic vocal range perfectly aligned with the front LEDs |
 
-> **Auto Cycle**: Automatically cycles between Mode 1 and Mode 2 every 60 seconds.
+> **Auto Cycle**: Automatically cycles through all 4 modes every 60 seconds. You can lock into a specific mode using `echo 4 > /data/led_mode`.
 
 ---
 
@@ -74,6 +76,7 @@ An ultra-low-latency music visualizer for the **Xiaomi Xiaoai Smart Speaker (Mod
 ├── led_guard.sh        # Smart companion daemon (ubus status detection + auto switching)
 ├── build.sh            # Cross-compilation script (Clang/LLD, static strip)
 ├── deploy.py           # Automated SSH deployment and autostart configuration script
+├── EFFECTS.md          # Comprehensive acoustic visualizer algorithm design doc
 ├── README.md           # Chinese Documentation
 └── README_EN.md        # English Documentation
 ```
