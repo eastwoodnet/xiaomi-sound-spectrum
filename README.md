@@ -1,4 +1,4 @@
-# 小米 Sound (L06A) 音乐声光律动系统 (v1.1-beta)
+# 小米 Sound (L06A) 音乐声光律动系统
 
 [English](README_EN.md) | 简体中文
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 📝 v1.1-beta 重要更新说明 (Changelog)
+## 📝 v1.1 Release 重大更新说明 (Changelog)
 
 - **🎨 动态调色板系统与主题切换 (Dynamic Palettes & Themes)**：
   - **算法与色彩完全解耦**：新增独立调色配置文件 `/data/palettes.conf`，全面采用人类标准 `#RRGGBB` 十六进制色码；

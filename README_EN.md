@@ -1,4 +1,4 @@
-# Xiaomi Sound (L06A) Music Visualizer & Light Show (v1.1-beta)
+# Xiaomi Sound (L06A) Music Visualizer & Light Show
 
 English | [简体中文](README.md)
 
@@ -16,7 +16,7 @@ An ultra-low-latency music visualizer designed specifically for the **Xiaomi Xia
 
 ---
 
-## 📝 v1.1-beta Major Milestone Changelog
+## 📝 v1.1 Release Major Update Changelog
 
 - **🎨 Dynamic Palettes & Built-in Themes (`/data/palettes.conf`)**:
   - **Complete Decoupling of Algorithms and Colors**: Added standalone configuration file `/data/palettes.conf` utilizing standard human-readable `#RRGGBB` hex codes;
