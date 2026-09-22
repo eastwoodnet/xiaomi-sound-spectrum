@@ -169,36 +169,11 @@ THEME = aurora   # Options: rainbow / cyberpunk / ocean / fire / aurora / custom
 | **`aurora`** | 🌌 Aurora Borealis | Fluorescent green $\to$ turquoise $\to$ mystic purple | 90° ~ 280° mystic emerald & purple aurora fluid |
 | **`custom`** | 🎨 Custom | Geek tuning, loads custom mode parameters below | Governed by `MODE3_HUE_MIN` and `MAX` |
 
-### 2. Advanced Custom Tuning (when `THEME = custom`)
-To build your own palette, set `THEME = custom` in `/data/palettes.conf`:
+### 2. Advanced Custom Tuning (`THEME = custom`)
+For advanced customization, set `THEME = custom` and directly edit **`/data/palettes.conf`** on the speaker (or refer to the repository template [palettes.conf](palettes.conf)).
 
-```ini
-# [Mode 1: Stereo 8-Band Equalizer] (symmetric left/right, bass to treble)
-MODE1_BAND0 = #FF0020   # Band 0: Sub-Bass
-MODE1_BAND1 = #FF4500   # Band 1: Bass Punch
-MODE1_BAND2 = #FFB500   # Band 2: Low Mids
-MODE1_BAND3 = #30FF00   # Band 3: Core Vocal Midrange
-MODE1_BAND4 = #00FFFF   # Band 4: High Mids
-MODE1_BAND5 = #0075FF   # Band 5: Presence
-MODE1_BAND6 = #5000FF   # Band 6: Treble
-MODE1_BAND7 = #FF40FF   # Band 7: Air
-MODE1_TOP_BASS   = #FF0010   # LED 0 (back): Bass pulse color
-MODE1_BOT_TREBLE = #FFFFFF   # LED 9 (front): Treble spark color
+The configuration file includes comprehensive comments guiding you to adjust per-band color steps, dynamic centroid colors, floating peak accents, and fluid hue limits using standard `#RRGGBB` hex codes.
 
-# [Mode 2: Dynamic Full-Ring Bass Pulse]
-MODE2_BASS_COLOR   = #FF0010   # Bass burst dominant color
-MODE2_MID_COLOR    = #FF2800   # Mid vocal chorus dominant color
-MODE2_TREBLE_COLOR = #FF8000   # High treble impact color
-MODE2_PEAK_COLOR   = #FFF8E0   # Floating peak color
-MODE2_BG_COLOR     = #180002   # Ambient standby glow
-
-# [Mode 3: Fluid Lava Flow] (HSV hue range: 0-3600, 3600 = 360°)
-MODE3_HUE_MIN = 1600   # Starting hue (e.g., 1600 = 160° cyan)
-MODE3_HUE_MAX = 2400   # Ending hue (e.g., 2400 = 240° ocean blue)
-
-# [Mode 4: 18-Band Full Spectrum Chromatic Ring] (18 comma-separated #RRGGBB colors)
-MODE4_COLORS = #FF0000, #FF3000, #FF6000, #FFA000, #FFD000, #A0FF00, #00FF30, #00FF90, #00FFE0, #00E0FF, #0090FF, #0040FF, #2000FF, #7000FF, #C000FF, #FF00E0, #FF0080, #FF0030
-```
 
 ### 3. Millisecond Hot-Reloading
 After editing `/data/palettes.conf`, execute in the speaker shell:

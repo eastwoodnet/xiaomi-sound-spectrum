@@ -172,36 +172,11 @@ THEME = aurora   # 可选: rainbow / cyberpunk / ocean / fire / aurora / custom
 | **`aurora`** | 🌌 极光秘境 | 荧光翠绿 $\to$ 碧青绿 $\to$ 极光幽紫 | 90° ~ 280° 翠绿/碧青/幽紫深空极光流体 |
 | **`custom`** | 🎨 自定义调色 | 极客专属，加载下方自定义各个模式配置 | 由配置文件中的 `MODE3_HUE_MIN` 与 `MAX` 决定 |
 
-### 2. 极客高级自定义调色 (当 `THEME = custom` 时生效)
-如果您对色彩有独特的审美追求，只需将 `THEME = custom`，随后即可自由定制各个模式的每个频段与灯珠色温：
+### 2. 极客高级自定义调色 (`THEME = custom`)
+如果您对色彩有独特的个性化追求，只需将 `THEME = custom`，即可直接编辑音箱内部的 **`/data/palettes.conf`**（或参考代码仓库根目录的 [palettes.conf](palettes.conf) 模板）。
 
-```ini
-# [模式 1: 双翼 8 频段声学均衡器] (左翼与右翼对称，由低音到高音)
-MODE1_BAND0 = #FF0020   # 频段 0: 超低音 (Sub-Bass)
-MODE1_BAND1 = #FF4500   # 频段 1: 低音瞬态 (Bass Punch)
-MODE1_BAND2 = #FFB500   # 频段 2: 中低频 (Low Mids)
-MODE1_BAND3 = #30FF00   # 频段 3: 核心中频人声 (Midrange)
-MODE1_BAND4 = #00FFFF   # 频段 4: 中高频泛音 (High Mids)
-MODE1_BAND5 = #0075FF   # 频段 5: 存在打击感 (Presence)
-MODE1_BAND6 = #5000FF   # 频段 6: 明亮高频 (Treble)
-MODE1_BAND7 = #FF40FF   # 频段 7: 极高频空气感 (Air)
-MODE1_TOP_BASS   = #FF0010   # 顶部 LED 0 纯正超低音鼓爆发脉冲色
-MODE1_BOT_TREBLE = #FFFFFF   # 底部 LED 9 极高频瞬态碰撞高光色
+文件中已预置详细的逐项注释，支持通过人类直观的标准 `#RRGGBB` 十六进制色码对各个律动模式的频段色阶、灯珠色温、峰值悬停色及色相流体区间进行自由定制。
 
-# [模式 2: 重低音大动态立体声律动] (动态能量质心色温)
-MODE2_BASS_COLOR   = #FF0010   # 重低音爆发主导色
-MODE2_MID_COLOR    = #FF2800   # 中频主唱副歌主导色
-MODE2_TREBLE_COLOR = #FF8000   # 明亮高频激昂主导色
-MODE2_PEAK_COLOR   = #FFF8E0   # 悬停峰值点颜色 (建议高亮白炽色)
-MODE2_BG_COLOR     = #180002   # 待机暗夜微光底色 (避免全黑频闪)
-
-# [模式 3: 熔岩流体流动] (HSV 色相区间: 0-3600，3600 对应 360 度圆周)
-MODE3_HUE_MIN = 1600   # 起始色相 (如 1600 对应天青色)
-MODE3_HUE_MAX = 2400   # 截止色相 (如 2400 对应深海蓝)
-
-# [模式 4: 全频 18 频段基准配色环] (顺时针 18 颗灯珠基准色，逗号分隔 18 个 #RRGGBB)
-MODE4_COLORS = #FF0000, #FF3000, #FF6000, #FFA000, #FFD000, #A0FF00, #00FF30, #00FF90, #00FFE0, #00E0FF, #0090FF, #0040FF, #2000FF, #7000FF, #C000FF, #FF00E0, #FF0080, #FF0030
-```
 
 ### 3. 毫秒级即时热重载生效 (Hot-Reload)
 修改完 `/data/palettes.conf` 后，**无需重启程序，无需重启音箱，音乐更不会中断**！直接在音箱终端执行：
