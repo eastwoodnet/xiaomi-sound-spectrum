@@ -419,6 +419,18 @@ static inline int get_band_energy(const int *mags, int b) {
     return max_val;
 }
 
+/* 8 频段自适应动态门限 (弥补高频天然能量滚降) */
+static const int MIN_DIFF[8] = {
+    3000, /* Band 0: Sub-Bass (~47-94 Hz) */
+    3000, /* Band 1: Bass Punch (~141-188 Hz) */
+    2500, /* Band 2: Low Mids (~234-422 Hz) */
+    2000, /* Band 3: Midrange (~469-938 Hz) */
+    1500, /* Band 4: High Mids (~984-2156 Hz) */
+    1200, /* Band 5: Presence (~2.2k-4.5kHz) */
+     800, /* Band 6: Treble (~4.5k-8.4kHz) */
+     600  /* Band 7: Air (~8.5k-15.9kHz) */
+};
+
 /* ================================================================
  * 高保真色彩系统 (BGR 格式: 0xBBGGRR)
  * ================================================================ */
@@ -643,99 +655,99 @@ static void render_lava(int *level_l, int *level_r) {
 }
 
 /* ================================================================
- * 模式 4: 环形立体声频谱 (Ring Spectrum)
+ * 模式 4: 二维色阶立体声环形频谱 (2D HSV Phase Shift Matrix)
+ *
+ * 声道划分 (18 颗灯珠从 8, 9 中间切分):
+ * - 正面分界线: LED 8 (左侧) 与 LED 9 (右侧)
+ * - 背面分界线: LED 0 (左侧) 与 LED 17 (右侧)
+ * - 左声道: LED 8(前/低频) -> 7 -> 6 -> 5 -> 4 -> 3 -> 2 -> 1 -> 0(后/高频)
+ * - 右声道: LED 9(前/低频) -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17(后/高频)
+ *
+ * 二维色阶量化设计:
+ * 1. 横向色阶 (空间/频段维度 k = 0..8, 从前到后):
+ *    沿环形分布冷调基色 (深海蓝 215° -> 靛蓝 -> 极光紫 305°),
+ *    电平为 0 时保持约 45% (val=115) 优雅常亮底光，绝不熄灭。
+ * 2. 纵向色阶 (能量/电平维度 lev = 0..100):
+ *    频段波峰变化时驱动色相大角度向暖色跃迁 (最大 170°):
+ *    - 低频 (k=0, 前): 深海蓝(215°) -> 极光青 -> 翠绿 -> 烈日金黄 -> 炽热火红(45°)
+ *    - 中频 (k=4, 侧): 靛紫(260°) -> 赛博青 -> 荧光明黄(90°)
+ *    - 高频 (k=8, 后): 极光紫(305°) -> 电光冰蓝 -> 翡翠翠绿(135°)
+ *    波峰 (>75) 饱和度褪色白炽化，>88 触发纯白极光爆闪。
  * ================================================================ */
-
-/* LED -> 频段映射 (对称镜像, 左翼左声道/右翼右声道)
- * LED 9:  正面锚点 (低音鼓心跳)
- * LED 8-1: Band 0-7 左翼 (左声道, 低频→高频, 从前到后)
- * LED 0:  背面锚点 (全频段动态混色)
- * LED 10-17: Band 0-7 右翼 (右声道, 低频→高频, 从前到后)
- */
-static const int LED_TO_BAND[18] = {
-    -1,  /* LED 0:  背面锚点 */
-     7,  /* LED 1:  Band 7 Air */
-     6,  /* LED 2:  Band 6 Treble */
-     5,  /* LED 3:  Band 5 Presence */
-     4,  /* LED 4:  Band 4 High Mids */
-     3,  /* LED 5:  Band 3 Midrange */
-     2,  /* LED 6:  Band 2 Low Mids */
-     1,  /* LED 7:  Band 1 Bass Punch */
-     0,  /* LED 8:  Band 0 Sub-Bass */
-    -2,  /* LED 9:  正面锚点 (低音鼓心跳) */
-     0,  /* LED 10: Band 0 Sub-Bass */
-     1,  /* LED 11: Band 1 Bass Punch */
-     2,  /* LED 12: Band 2 Low Mids */
-     3,  /* LED 13: Band 3 Midrange */
-     4,  /* LED 14: Band 4 High Mids */
-     5,  /* LED 15: Band 5 Presence */
-     6,  /* LED 16: Band 6 Treble */
-     7   /* LED 17: Band 7 Air */
-};
+static const int BAND_MAP_9[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 7 };
 
 static void render_spectrum(int *level_l, int *level_r) {
-    /* 背面锚点 LED 0: 全频段动态混色 */
-    int total_l = 0, total_r = 0;
-    for (int b = 0; b < 8; b++) {
-        total_l += level_l[b];
-        total_r += level_r[b];
-    }
-    int avg_level = (total_l + total_r) / 16;  /* 0-100 */
-    /* 全频段混色: 低频偏红, 高频偏蓝, 以频段能量加权 */
-    int sum_all = total_l + total_r;
-    uint32_t back_color;
-    if (sum_all > 0) {
-        int bass_w = (level_l[0] + level_r[0] + level_l[1] + level_r[1]) * 100 / sum_all;
-        int treble_w = (level_l[6] + level_r[6] + level_l[7] + level_r[7]) * 100 / sum_all;
-        if (bass_w > 40) {
-            back_color = blend_color(0x0020FF, 0x0080FF, (100 - bass_w) * 2);
-        } else if (treble_w > 30) {
-            back_color = blend_color(0xFF7500, 0xFF40FF, treble_w * 2);
-        } else {
-            back_color = blend_color(0x00FF30, 0xFFFF00, 50);
-        }
-    } else {
-        back_color = 0x100002;
-    }
-    int back_pct = avg_level;
-    if (back_pct > 100) back_pct = 100;
-    current_colors[0] = scale_color(back_color, back_pct);
+    for (int k = 0; k < 9; k++) {
+        /* 1. 横向基准色相 (0.1度精度): 215.0° 到 305.0° (深海蓝 -> 极光紫) */
+        int h_base = 2150 + (k * 900) / 8;
 
-    /* 正面锚点 LED 9: 低音鼓心跳脉冲 */
-    int bass_energy = (level_l[0] + level_r[0]) / 2;
-    if (bass_energy > 50) {
-        uint32_t bass_pulse = blend_color(0x0020FF, C_WHITE, (bass_energy - 50) * 2);
-        current_colors[9] = scale_color(bass_pulse, bass_energy);
-    } else {
-        current_colors[9] = scale_color(0x0000FF, bass_energy);
-    }
+        /* ---------- 左声道 (LED 8 - k) ---------- */
+        {
+            int led_idx = 8 - k;
+            int lev = (k < 8) ? level_l[BAND_MAP_9[k]] : (level_l[6] + level_l[7]) / 2;
 
-    /* 频段 LED 渲染 (保留立体声) */
-    for (int i = 0; i < 18; i++) {
-        int band = LED_TO_BAND[i];
-        if (band < 0) continue;  /* 锚点已处理 */
+            /* 纵向色相偏移 (最大 170.0°) */
+            int h_shift = (lev * 1700) / 100;
+            int h = h_base - h_shift;
+            while (h < 0) h += 3600;
+            while (h >= 3600) h -= 3600;
 
-        /* 选择对应声道 */
-        int lev;
-        if (i >= 1 && i <= 8) {
-            lev = level_l[band];  /* 左翼 = 左声道 */
-        } else {
-            lev = level_r[band];  /* 右翼 = 右声道 */
+            /* 饱和度与波峰白炽化 */
+            int sat = 245;
+            if (lev > 75) {
+                sat = 245 - ((lev - 75) * 115) / 25; /* 245 -> 130 */
+                if (sat < 100) sat = 100;
+            }
+
+            /* 亮度: 恒亮底光 (115) 到爆发光 (215)，主打色彩质变而非明暗闪烁 */
+            int val = 115 + (lev * 100) / 100;
+            if (val > 215) val = 215;
+
+            uint32_t color = hsv_to_bgr(h / 10, sat, val);
+
+            /* 波峰瞬态高光混合 (>88) */
+            if (lev > 88) {
+                int white_mix = (lev - 88) * 5; /* 0 ~ 60% */
+                if (white_mix > 60) white_mix = 60;
+                color = blend_color(color, C_WHITE, white_mix);
+            }
+
+            current_colors[led_idx] = color;
         }
 
-        /* 亮度缩放: 正确归一化到 0-100 */
-        int brightness_pct = 30 + lev * 70 / 100;  /* 30 ~ 100 */
+        /* ---------- 右声道 (LED 9 + k) ---------- */
+        {
+            int led_idx = 9 + k;
+            int lev = (k < 8) ? level_r[BAND_MAP_9[k]] : (level_r[6] + level_r[7]) / 2;
 
-        uint32_t color = PAL_SPECTRUM[band];
+            /* 纵向色相偏移 (最大 170.0°) */
+            int h_shift = (lev * 1700) / 100;
+            int h = h_base - h_shift;
+            while (h < 0) h += 3600;
+            while (h >= 3600) h -= 3600;
 
-        /* 峰值向白混合 (>85) */
-        if (lev > 85) {
-            int white_pct = (lev - 85) * 6;
-            if (white_pct > 60) white_pct = 60;
-            color = blend_color(color, C_WHITE, white_pct);
+            /* 饱和度与波峰白炽化 */
+            int sat = 245;
+            if (lev > 75) {
+                sat = 245 - ((lev - 75) * 115) / 25;
+                if (sat < 100) sat = 100;
+            }
+
+            /* 亮度 */
+            int val = 115 + (lev * 100) / 100;
+            if (val > 215) val = 215;
+
+            uint32_t color = hsv_to_bgr(h / 10, sat, val);
+
+            /* 波峰瞬态高光混合 (>88) */
+            if (lev > 88) {
+                int white_mix = (lev - 88) * 5;
+                if (white_mix > 60) white_mix = 60;
+                color = blend_color(color, C_WHITE, white_mix);
+            }
+
+            current_colors[led_idx] = color;
         }
-
-        current_colors[i] = scale_color(color, brightness_pct);
     }
 }
 
@@ -752,7 +764,7 @@ static void log_mode(int mode) {
             static const char m[] = "模式 3: 彩虹熔岩流动 (HSV 色相行波)\n";
             sys_write(fd, m, sizeof(m) - 1);
         } else {
-            static const char m[] = "模式 4: 环形立体声频谱 (对称镜像)\n";
+            static const char m[] = "模式 4: 二维色阶环形立体声 (2D HSV 色相跃迁)\n";
             sys_write(fd, m, sizeof(m) - 1);
         }
         sys_close(fd);
@@ -999,8 +1011,9 @@ void main_loop(long argc, char **argv) {
             if (el < low_l[b]) low_l[b] = el;
             else low_l[b] = (low_l[b] * 199 + el) / 200;
 
+            int min_d = MIN_DIFF[b];
             int diff_l = high_l[b] - low_l[b];
-            if (diff_l < 3000) diff_l = 3000;
+            if (diff_l < min_d) diff_l = min_d;
 
             int raw_l = 0;
             if (el > low_l[b]) {
@@ -1019,7 +1032,7 @@ void main_loop(long argc, char **argv) {
             else low_r[b] = (low_r[b] * 199 + er) / 200;
 
             int diff_r = high_r[b] - low_r[b];
-            if (diff_r < 3000) diff_r = 3000;
+            if (diff_r < min_d) diff_r = min_d;
 
             int raw_r = 0;
             if (er > low_r[b]) {
