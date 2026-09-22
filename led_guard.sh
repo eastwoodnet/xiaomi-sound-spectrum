@@ -73,21 +73,86 @@ send_ha_discovery() {
     
     # 1. 注册 Select 实体: 律动模式选择器
     local disc_select="homeassistant/select/xiaomi_sound_l06a/led_mode/config"
-    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-release"}}'
+    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-beta"}}'
     mqtt_pub -t "$disc_select" -m "$payload_select" -r
 
     # 2. 注册 Switch 实体: 律动总开关
     local disc_switch="homeassistant/switch/xiaomi_sound_l06a/visualizer/config"
-    local payload_switch='{"name":"声光律动总开关","unique_id":"xiaomi_sound_l06a_visualizer_switch","command_topic":"xiaomi_sound/led/power/set","state_topic":"xiaomi_sound/led/power/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","payload_on":"ON","payload_off":"OFF","icon":"mdi:speaker-wireless","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-release"}}'
+    local payload_switch='{"name":"声光律动总开关","unique_id":"xiaomi_sound_l06a_visualizer_switch","command_topic":"xiaomi_sound/led/power/set","state_topic":"xiaomi_sound/led/power/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","payload_on":"ON","payload_off":"OFF","icon":"mdi:speaker-wireless","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-beta"}}'
     mqtt_pub -t "$disc_switch" -m "$payload_switch" -r
 
     # 3. 注册 Sensor 实体: 当前运行律动 (实时显示实际运行模式或待机状态)
     local disc_sensor="homeassistant/sensor/xiaomi_sound_l06a/current_mode/config"
-    local payload_sensor='{"name":"当前运行律动","unique_id":"xiaomi_sound_l06a_current_mode","state_topic":"xiaomi_sound/led/current_mode","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:waveform","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.0-release"}}'
+    local payload_sensor='{"name":"当前运行律动","unique_id":"xiaomi_sound_l06a_current_mode","state_topic":"xiaomi_sound/led/current_mode","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:waveform","device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-beta"}}'
     mqtt_pub -t "$disc_sensor" -m "$payload_sensor" -r
 
-    # 4. 初始上线通知 (Retained)
+    # 4. 注册 Select 实体: 声光主题风格 (Theme)
+    local disc_theme="homeassistant/select/xiaomi_sound_l06a/led_theme/config"
+    local payload_theme='{"name":"声光主题风格","unique_id":"xiaomi_sound_l06a_led_theme","command_topic":"xiaomi_sound/led/theme/set","state_topic":"xiaomi_sound/led/theme/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:palette-outline","options":["🌈 经典彩虹","🌆 赛博朋克","🌊 深海冰蓝","🔥 炽热烈焰","🌌 极光秘境","🎨 自定义调色"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-beta"}}'
+    mqtt_pub -t "$disc_theme" -m "$payload_theme" -r
+
+    # 5. 初始上线通知 (Retained)
     mqtt_pub -t "xiaomi_sound/led/availability" -m "online" -r
+}
+
+get_theme_name() {
+    local t="rainbow"
+    if [ -f "/data/palettes.conf" ]; then
+        t=$(grep -E '^[[:space:]]*THEME[[:space:]]*=' /data/palettes.conf 2>/dev/null | cut -d'=' -f2 | tr -d ' \t\r\n')
+    fi
+    case "$t" in
+        "cyberpunk") echo "🌆 赛博朋克" ;;
+        "ocean")     echo "🌊 深海冰蓝" ;;
+        "fire")      echo "🔥 炽热烈焰" ;;
+        "aurora")    echo "🌌 极光秘境" ;;
+        "custom")    echo "🎨 自定义调色" ;;
+        *)           echo "🌈 经典彩虹" ;;
+    esac
+}
+
+handle_theme_command() {
+    local cmd="$1"
+    local t_val=""
+    local t_name=""
+    case "$cmd" in
+        *"赛博朋克"*|"cyberpunk")
+            t_val="cyberpunk"
+            t_name="🌆 赛博朋克"
+            ;;
+        *"深海冰蓝"*|"ocean")
+            t_val="ocean"
+            t_name="🌊 深海冰蓝"
+            ;;
+        *"炽热烈焰"*|"fire")
+            t_val="fire"
+            t_name="🔥 炽热烈焰"
+            ;;
+        *"极光秘境"*|"aurora")
+            t_val="aurora"
+            t_name="🌌 极光秘境"
+            ;;
+        *"自定义"*|"custom")
+            t_val="custom"
+            t_name="🎨 自定义调色"
+            ;;
+        *"经典彩虹"*|"rainbow"|*)
+            t_val="rainbow"
+            t_name="🌈 经典彩虹"
+            ;;
+    esac
+
+    if [ -f "/data/palettes.conf" ]; then
+        if grep -q -E '^[[:space:]]*THEME[[:space:]]*=' /data/palettes.conf; then
+            sed -i "s/^[[:space:]]*THEME[[:space:]]*=.*/THEME = $t_val/" /data/palettes.conf
+        else
+            echo "THEME = $t_val" >> /data/palettes.conf
+        fi
+    else
+        echo "THEME = $t_val" > /data/palettes.conf
+    fi
+
+    touch /tmp/reload_palette
+    mqtt_pub -t "xiaomi_sound/led/theme/state" -m "$t_name" -r
 }
 
 switch_mode_action() {
@@ -158,12 +223,15 @@ mqtt_worker() {
                 cur_active="$cur_name"
             fi
             report_state "$cur_name" "$pwr_state" "$cur_active"
+            cur_theme=$(get_theme_name)
+            mqtt_pub -t "xiaomi_sound/led/theme/state" -m "$cur_theme" -r
 
             # 阻塞订阅控制指令，配置 LWT 离线遗嘱
             mqtt_sub --will-topic "xiaomi_sound/led/availability" \
                      --will-payload "offline" --will-retain \
                      -t "xiaomi_sound/led/set" \
-                     -t "xiaomi_sound/led/power/set" -v | while read -r line; do
+                     -t "xiaomi_sound/led/power/set" \
+                     -t "xiaomi_sound/led/theme/set" -v | while read -r line; do
                 topic=$(echo "$line" | cut -d' ' -f1)
                 payload=$(echo "$line" | cut -d' ' -f2-)
                 if [ "$topic" = "xiaomi_sound/led/power/set" ]; then
@@ -175,6 +243,8 @@ mqtt_worker() {
                     fi
                 elif [ "$topic" = "xiaomi_sound/led/set" ]; then
                     handle_mode_command "$payload"
+                elif [ "$topic" = "xiaomi_sound/led/theme/set" ]; then
+                    handle_theme_command "$payload"
                 fi
             done
         fi

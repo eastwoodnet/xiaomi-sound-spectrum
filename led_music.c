@@ -24,6 +24,7 @@ typedef unsigned long uint64_t;
 
 /* ---------------- Linux aarch64 直通系统调用定义 ---------------- */
 #define SYS_dup3          24
+#define SYS_unlinkat      35
 #define SYS_openat        56
 #define SYS_close         57
 #define SYS_pipe2         59
@@ -67,6 +68,15 @@ static inline long sys_close(int fd) {
     register long x8 __asm__("x8") = SYS_close;
     register long x0 __asm__("x0") = fd;
     __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8) : "memory");
+    return x0;
+}
+
+static inline long sys_unlinkat(int dfd, const char *pathname, int flags) {
+    register long x8 __asm__("x8") = SYS_unlinkat;
+    register long x0 __asm__("x0") = dfd;
+    register const char *x1 __asm__("x1") = pathname;
+    register long x2 __asm__("x2") = flags;
+    __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8), "r"(x1), "r"(x2) : "memory");
     return x0;
 }
 
@@ -439,17 +449,282 @@ static const int MIN_DIFF[8] = {
 #define C_WHITE     0xFFFFFF    /* 爆闪极光纯白 */
 #define C_MUTE_RED  0x0000FF    /* 麦克风静音正红 */
 
-/* 8 频段光谱调色板 (从低频炽热烈焰 → 中频生机翠绿 → 高频赛博冰蓝) */
-static const uint32_t PAL_SPECTRUM[8] = {
-    0x0000FF,   /* Band 0: 烈焰深红 (Sub-Bass) */
-    0x0045FF,   /* Band 1: 烈阳火橙 (Bass Punch) */
-    0x00B5FF,   /* Band 2: 琥珀金黄 (Low Mids) */
-    0x00FF30,   /* Band 3: 荧光青翠 (Midrange) */
-    0xFFFF00,   /* Band 4: 赛博明青 (High Mids) */
-    0xFF7500,   /* Band 5: 天空湛蓝 (Presence) */
-    0xFF0050,   /* Band 6: 极电靛蓝 (Treble) */
-    0xFF40FF    /* Band 7: 极光粉紫 (Air) */
+/* ================================================================
+ * 动态调色板系统 (Dynamic Palettes & Themes)
+ * 格式说明:
+ *   - 硬件 AW20054 使用 BGR (0xBBGGRR) 寄存器格式
+ *   - 用户配置文件 (/data/palettes.conf) 使用标准人类 RGB (#RRGGBB)
+ * ================================================================ */
+typedef struct {
+    char name[32];
+    uint32_t m1_bands[8];
+    uint32_t m1_top_bass;
+    uint32_t m1_bot_treble;
+    uint32_t m2_bass_color;
+    uint32_t m2_mid_color;
+    uint32_t m2_treble_color;
+    uint32_t m2_peak_color;
+    uint32_t m2_bg_color;
+    int m3_hue_min;
+    int m3_hue_max;
+    uint32_t m4_bands[18];
+} ThemePalette;
+
+/* 预设 1: 经典彩虹 (Rainbow) */
+static const ThemePalette PALETTE_RAINBOW = {
+    "rainbow",
+    { 0x0000FF, 0x0045FF, 0x00B5FF, 0x00FF30, 0xFFFF00, 0xFF7500, 0xFF0050, 0xFF40FF },
+    0x0020FF, 0xFFFFFF,
+    0x0000FF, 0xB5FF00, 0xFF8000, 0xFFFFFF, 0x100002,
+    0, 3600,
+    {
+        0x0000FF, 0x002BFF, 0x0055FF, 0x0080FF, 0x00AAFF, 0x00FFD5,
+        0x00FFAA, 0x00FF80, 0x00FF55, 0x00FF2B, 0x00FF00, 0x55FF00,
+        0xAAFF00, 0xFFFF00, 0xFFAA00, 0xFF5500, 0xFF0000, 0xAA00FF
+    }
 };
+
+/* 预设 2: 赛博朋克 (Cyberpunk: 霓虹粉紫 + 魅影深紫 + 极电明青) */
+static const ThemePalette PALETTE_CYBERPUNK = {
+    "cyberpunk",
+    { 0x7F00FF, 0xB200FF, 0xFF00B2, 0xFF0066, 0x0075FF, 0x00D4FF, 0x00FFFF, 0xFFFFFF },
+    0xFF007F, 0x00FFFF,
+    0xFF007F, 0xBF00FF, 0x00FFFF, 0xFFFFFF, 0x140008,
+    1800, 3200,
+    {
+        0x7F00FF, 0x9900FF, 0xBF00FF, 0xE500FF, 0xFF00D4, 0xFF00AA,
+        0xFF007F, 0xFF0055, 0xCC0055, 0x0075FF, 0x00A2FF, 0x00D4FF,
+        0x00F5FF, 0x00FFFF, 0x55FFFF, 0xAAFFFF, 0xFFFFFF, 0xAA00FF
+    }
+};
+
+/* 预设 3: 深海冰蓝 (Ocean: 深海魅蓝 -> 蔚蓝天空 -> 极地冰青) */
+static const ThemePalette PALETTE_OCEAN = {
+    "ocean",
+    { 0x882200, 0xCC4400, 0xFF6600, 0xFFA200, 0xFFD800, 0xFFAA00, 0xDDFF80, 0xFFFFE0 },
+    0xFF5500, 0xFFFFE0,
+    0xFF3300, 0xFFD400, 0xAAFF00, 0xFFFFFF, 0x140800,
+    1600, 2400,
+    {
+        0x551100, 0x882200, 0xBB3300, 0xEE4400, 0xFF6600, 0xFF8800,
+        0xFFAA00, 0xFFCC00, 0xFFEE00, 0xEEFF00, 0xCCFF22, 0xAAFF55,
+        0x88FF88, 0x55FFAA, 0x22FFDD, 0x00FFFF, 0x88FFFF, 0xFFFFEE
+    }
+};
+
+/* 预设 4: 炽热烈焰 (Fire: 猩红血月 -> 烈焰赤红 -> 灼热火橙 -> 琥珀金芒 -> 白炽火核) */
+static const ThemePalette PALETTE_FIRE = {
+    "fire",
+    /* 模式 1: 双翼 8 频段声学均衡器 (低频猩红深红 -> 核心中频纯火大红 -> 高频火橙赤金 -> 白炽峰顶) */
+    { 0x1000D0, 0x2000FF, 0x0018FF, 0x0035FF, 0x0055FF, 0x0078FF, 0x00A5FF, 0xA0E8FF },
+    0x1000FF,   /* m1_top_bass: 顶部 LED 0 纯正超低音烈焰冲击 (RGB #FF0010) */
+    0xC0F0FF,   /* m1_bot_treble: 底部 LED 9 白炽烈核瞬态碰撞闪光 (RGB #FFF0C0) */
+    /* 模式 2: 重低音大动态立体声 (全场赤红统治) */
+    0x1000FF,   /* m2_bass_color: 低音主导爆发色 (纯正烈火大红 RGB #FF0010) */
+    0x0028FF,   /* m2_mid_color: 中频主唱色温 (烈焰赤橙红 RGB #FF2800) */
+    0x0080FF,   /* m2_treble_color: 高频冲击色温 (灼热焰金 RGB #FF8000) */
+    0xE0F8FF,   /* m2_peak_color: 悬停峰值点 (白热火星高光 RGB #FFF8E0) */
+    0x020018,   /* m2_bg_color: 待机暗夜炭火微光 (RGB #180002) */
+    /* 模式 3: 熔岩流动 (色相严格限制在 0.0° ~ 28.0°，纯正火红地底岩浆流动，绝无绿黄色温) */
+    0, 280,
+    /* 模式 4: 18 频段全频火海色谱 (0-7号深红猩红大红, 8-11号烈阳赤橙, 12-15号琥珀炎金, 16-17号白炽火核) */
+    {
+        0x1500FF, 0x2000FF, 0x1008FF, 0x0014FF, 0x0022FF, 0x0030FF,
+        0x003EFF, 0x004DFF, 0x005CFF, 0x006BFF, 0x007BFF, 0x008BFF,
+        0x009CFF, 0x00ADFF, 0x00C0FF, 0x00D2FF, 0x60E6FF, 0xB0F4FF
+    }
+};
+
+/* 预设 5: 极光秘境 (Aurora: 荧光青翠 -> 碧水冰蓝 -> 极光幽紫) */
+static const ThemePalette PALETTE_AURORA = {
+    "aurora",
+    { 0x66FF00, 0x88E500, 0xD5FF00, 0xFFB500, 0xFF7700, 0xFF0044, 0xFF0099, 0xFF44AA },
+    0x66FF00, 0xFF0099,
+    0x66FF00, 0xD5FF00, 0xFF0099, 0xFFFFFF, 0x081002,
+    900, 2800,
+    {
+        0x44FF00, 0x77FF00, 0xAAFF00, 0xDDFF00, 0xFFEE00, 0xFFBB00,
+        0xFF8800, 0xFF5500, 0xFF2200, 0xFF0044, 0xFF0088, 0xFF00CC,
+        0xDD00FF, 0x9900FF, 0x5500FF, 0x0044FF, 0x0099FF, 0x00FFD5
+    }
+};
+
+static ThemePalette active_palette;
+
+static inline int hex_val(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static uint32_t parse_hex_color(const char *s, int is_rgb) {
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s == '#') s++;
+    else if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) s += 2;
+
+    uint32_t val = 0;
+    int digits = 0;
+    while (*s && digits < 6) {
+        int h = hex_val(*s);
+        if (h < 0) break;
+        val = (val << 4) | h;
+        s++;
+        digits++;
+    }
+    if (digits < 6) return 0;
+    if (is_rgb) {
+        uint32_t r = (val >> 16) & 0xFF;
+        uint32_t g = (val >> 8) & 0xFF;
+        uint32_t b = val & 0xFF;
+        return (b << 16) | (g << 8) | r;
+    }
+    return val;
+}
+
+static inline int str_equals(const char *s1, const char *s2) {
+    while (*s1 && *s2) {
+        if (*s1 != *s2) return 0;
+        s1++; s2++;
+    }
+    return (*s1 == '\0' && *s2 == '\0');
+}
+
+static inline int str_starts_with(const char *str, const char *prefix) {
+    while (*prefix) {
+        if (*str != *prefix) return 0;
+        str++; prefix++;
+    }
+    return 1;
+}
+
+static void copy_palette(ThemePalette *dst, const ThemePalette *src) {
+    for (int i = 0; i < 32; i++) dst->name[i] = src->name[i];
+    for (int i = 0; i < 8; i++) dst->m1_bands[i] = src->m1_bands[i];
+    dst->m1_top_bass = src->m1_top_bass;
+    dst->m1_bot_treble = src->m1_bot_treble;
+    dst->m2_bass_color = src->m2_bass_color;
+    dst->m2_mid_color = src->m2_mid_color;
+    dst->m2_treble_color = src->m2_treble_color;
+    dst->m2_peak_color = src->m2_peak_color;
+    dst->m2_bg_color = src->m2_bg_color;
+    dst->m3_hue_min = src->m3_hue_min;
+    dst->m3_hue_max = src->m3_hue_max;
+    for (int i = 0; i < 18; i++) dst->m4_bands[i] = src->m4_bands[i];
+}
+
+static void load_palette_config(void) {
+    copy_palette(&active_palette, &PALETTE_RAINBOW);
+    int is_custom = 0;
+
+    int fd = sys_openat(AT_FDCWD, "/data/palettes.conf", O_RDONLY, 0);
+    if (fd < 0) return;
+
+    static char buf[4096];
+    long n = sys_read(fd, buf, sizeof(buf) - 1);
+    sys_close(fd);
+    if (n <= 0) return;
+    buf[n] = '\0';
+
+    char *p = buf;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\r') p++;
+        if (*p == '\n') { p++; continue; }
+        if (*p == '#') {
+            while (*p && *p != '\n') p++;
+            if (*p == '\n') p++;
+            continue;
+        }
+
+        char key[32];
+        int klen = 0;
+        while (*p && *p != '=' && *p != ' ' && *p != '\t' && *p != '\n' && klen < 31) {
+            key[klen++] = *p++;
+        }
+        key[klen] = '\0';
+
+        while (*p && *p != '=' && *p != '\n') p++;
+        if (*p != '=') {
+            while (*p && *p != '\n') p++;
+            if (*p == '\n') p++;
+            continue;
+        }
+        p++;
+
+        while (*p == ' ' || *p == '\t') p++;
+
+        char val[256];
+        int vlen = 0;
+        /* 允许 # 开头的十六进制色彩，只将 [空格]# 或 [制表符]# 视为行内注释 */
+        while (*p && *p != '\n' && *p != '\r' && vlen < 255) {
+            if ((*p == ' ' || *p == '\t') && *(p + 1) == '#') break;
+            val[vlen++] = *p++;
+        }
+        while (vlen > 0 && (val[vlen - 1] == ' ' || val[vlen - 1] == '\t')) vlen--;
+        val[vlen] = '\0';
+
+        while (*p && *p != '\n') p++;
+        if (*p == '\n') p++;
+
+        if (klen == 0 || vlen == 0) continue;
+
+        if (str_equals(key, "THEME")) {
+            if (str_equals(val, "cyberpunk")) copy_palette(&active_palette, &PALETTE_CYBERPUNK);
+            else if (str_equals(val, "ocean")) copy_palette(&active_palette, &PALETTE_OCEAN);
+            else if (str_equals(val, "fire")) copy_palette(&active_palette, &PALETTE_FIRE);
+            else if (str_equals(val, "aurora")) copy_palette(&active_palette, &PALETTE_AURORA);
+            else if (str_equals(val, "rainbow")) copy_palette(&active_palette, &PALETTE_RAINBOW);
+            else if (str_equals(val, "custom")) is_custom = 1;
+        } else if (is_custom) {
+            if (str_starts_with(key, "MODE1_BAND")) {
+                int b = key[10] - '0';
+                if (b >= 0 && b < 8) {
+                    uint32_t c = parse_hex_color(val, 1);
+                    if (c != 0) active_palette.m1_bands[b] = c;
+                }
+            } else if (str_equals(key, "MODE1_TOP_BASS")) {
+                uint32_t c = parse_hex_color(val, 1);
+                if (c != 0) active_palette.m1_top_bass = c;
+            } else if (str_equals(key, "MODE1_BOT_TREBLE")) {
+                uint32_t c = parse_hex_color(val, 1);
+                if (c != 0) active_palette.m1_bot_treble = c;
+            } else if (str_equals(key, "MODE2_BASS_COLOR")) {
+                uint32_t c = parse_hex_color(val, 1);
+                if (c != 0) active_palette.m2_bass_color = c;
+            } else if (str_equals(key, "MODE2_MID_COLOR")) {
+                uint32_t c = parse_hex_color(val, 1);
+                if (c != 0) active_palette.m2_mid_color = c;
+            } else if (str_equals(key, "MODE2_TREBLE_COLOR")) {
+                uint32_t c = parse_hex_color(val, 1);
+                if (c != 0) active_palette.m2_treble_color = c;
+            } else if (str_equals(key, "MODE2_PEAK_COLOR")) {
+                uint32_t c = parse_hex_color(val, 1);
+                if (c != 0) active_palette.m2_peak_color = c;
+            } else if (str_equals(key, "MODE2_BG_COLOR")) {
+                uint32_t c = parse_hex_color(val, 1);
+                if (c != 0) active_palette.m2_bg_color = c;
+            } else if (str_equals(key, "MODE3_HUE_MIN")) {
+                int hv = 0; const char *sp = val;
+                while (*sp >= '0' && *sp <= '9') { hv = hv * 10 + (*sp - '0'); sp++; }
+                active_palette.m3_hue_min = hv;
+            } else if (str_equals(key, "MODE3_HUE_MAX")) {
+                int hv = 0; const char *sp = val;
+                while (*sp >= '0' && *sp <= '9') { hv = hv * 10 + (*sp - '0'); sp++; }
+                active_palette.m3_hue_max = hv;
+            } else if (str_equals(key, "MODE4_COLORS")) {
+                const char *vp = val;
+                for (int i = 0; i < 18 && *vp; i++) {
+                    while (*vp == ' ' || *vp == '\t' || *vp == ',') vp++;
+                    if (!*vp) break;
+                    uint32_t c = parse_hex_color(vp, 1);
+                    if (c != 0) active_palette.m4_bands[i] = c;
+                    while (*vp && *vp != ',') vp++;
+                    if (*vp == ',') vp++;
+                }
+            }
+        }
+    }
+}
 
 /* 颜色缩放与混合算法 */
 static inline uint32_t scale_color(uint32_t c, int level) {
@@ -723,7 +998,14 @@ static void render_lava(int *level_l, int *level_r) {
         if (v < 30) v = 30;
         if (v > 220) v = 220;
 
-        current_colors[i] = hsv_to_bgr(lava_hue[i] / 10, saturation, v);
+        int h_final = lava_hue[i];
+        if (active_palette.m3_hue_min != 0 || active_palette.m3_hue_max != 3600) {
+            int span = active_palette.m3_hue_max - active_palette.m3_hue_min;
+            if (span > 0 && span < 3600) {
+                h_final = active_palette.m3_hue_min + (lava_hue[i] * span) / 3600;
+            }
+        }
+        current_colors[i] = hsv_to_bgr(h_final / 10, saturation, v);
     }
 }
 
@@ -838,28 +1120,17 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
             peak_act = (norm * norm) / 100;    /* 二次方非线性幂律放大 0 ~ 100 */
         }
 
-        /* 18 颗连续色谱基准色相: 360° 均匀分为 18 份，步长 20.0° (200) */
-        int h_base = b * 200;
+        uint32_t base_c = active_palette.m4_bands[b];
 
-        /* 峰值触发色相向高能互补方向大角度跃迁 (+120.0°) */
-        int h_shift = (peak_act * 1200) / 100;
-        int h = h_base + h_shift;
-        while (h >= 3600) h -= 3600;
+        /* 亮度与能量自适应缩放: 恒定温润底光 (42%) 保持彩虹环完整，峰值跃迁至 95% */
+        int val_boost = 42 + (peak_act * 53) / 100;
+        if (val_boost > 95) val_boost = 95;
+        uint32_t color = scale_color(base_c, val_boost);
 
-        /* 峰值脱色白炽化 */
-        int sat = 245;
+        /* 峰值能量向主题峰值色与纯白爆闪过度 */
         if (peak_act > 40) {
-            sat = 245 - ((peak_act - 40) * 155) / 60;
-            if (sat < 85) sat = 85;
+            color = blend_color(color, active_palette.m2_peak_color, (peak_act - 40) * 2);
         }
-
-        /* 亮度: 恒定温润底光 (95, ~38%) 保持彩虹环完整，峰值跃迁至 220 */
-        int val = 95 + (peak_act * 125) / 100;
-        if (val > 220) val = 220;
-
-        uint32_t color = hsv_to_bgr(h / 10, sat, val);
-
-        /* 强峰值瞬态白光爆闪 (>78) */
         if (peak_act > 78) {
             int white_mix = (peak_act - 78) * 4;
             if (white_mix > 80) white_mix = 80;
@@ -968,7 +1239,8 @@ void main_loop(long argc, char **argv) {
         else if (argv[1][0] == 'a') { auto_cycle = 1; }
     }
 
-    /* 1. 初始化 AW20054 渐变时间 */
+    /* 1. 初始化 AW20054 渐变时间与调色板配置 */
+    load_palette_config();
     int fd_fade = sys_openat(AT_FDCWD, PATH_LED_FADE, O_WRONLY, 0);
     if (fd_fade >= 0) {
         static const char fr[] = "r 0xff\n";
@@ -1036,11 +1308,20 @@ void main_loop(long argc, char **argv) {
         }
 
         /* -------------------------------------------------------------
-         * 2. 麦克风静音物理按键检测 (每 20 帧 ~ 400ms 一次)
+         * 2. 热重载与麦克风静音物理按键检测 (每 20 帧 ~ 850ms 一次)
          * ------------------------------------------------------------- */
         mute_check_counter++;
         if (mute_check_counter >= 20) {
             mute_check_counter = 0;
+
+            /* 检查热重载调色板通知 */
+            int fd_reload = sys_openat(AT_FDCWD, "/tmp/reload_palette", O_RDONLY, 0);
+            if (fd_reload >= 0) {
+                sys_close(fd_reload);
+                sys_unlinkat(AT_FDCWD, "/tmp/reload_palette", 0);
+                load_palette_config();
+            }
+
             int fd_mute = sys_openat(AT_FDCWD, PATH_MUTE, O_RDONLY, 0);
             if (fd_mute >= 0) {
                 char mute_buf[8];
@@ -1213,7 +1494,7 @@ void main_loop(long argc, char **argv) {
             for (int b = 0; b < 8; b++) {
                 int led_idx = 1 + b;
                 int lev = level_l[b];
-                uint32_t col = PAL_SPECTRUM[b];
+                uint32_t col = active_palette.m1_bands[b];
                 if (lev > 85) {
                     col = blend_color(col, C_WHITE, (lev - 85) * 6);
                 }
@@ -1224,7 +1505,7 @@ void main_loop(long argc, char **argv) {
             for (int b = 0; b < 8; b++) {
                 int led_idx = 17 - b;
                 int lev = level_r[b];
-                uint32_t col = PAL_SPECTRUM[b];
+                uint32_t col = active_palette.m1_bands[b];
                 if (lev > 85) {
                     col = blend_color(col, C_WHITE, (lev - 85) * 6);
                 }
@@ -1234,10 +1515,10 @@ void main_loop(long argc, char **argv) {
             /* 顶部 LED 0: 纯正低音鼓心跳 */
             int bass_energy = (level_l[0] + level_r[0]) / 2;
             if (bass_energy > 50) {
-                uint32_t bass_pulse = blend_color(0x0020FF, C_WHITE, (bass_energy - 50) * 2);
+                uint32_t bass_pulse = blend_color(active_palette.m1_top_bass, C_WHITE, (bass_energy - 50) * 2);
                 current_colors[0] = scale_color(bass_pulse, bass_energy);
             } else {
-                current_colors[0] = scale_color(0x0000FF, bass_energy);
+                current_colors[0] = scale_color(active_palette.m1_top_bass, bass_energy);
             }
 
             /* 底部 LED 9: 高频打击瞬态碰撞 */
@@ -1245,7 +1526,7 @@ void main_loop(long argc, char **argv) {
             if (treble_energy > 60) {
                 current_colors[9] = scale_color(C_WHITE, treble_energy);
             } else {
-                current_colors[9] = scale_color(0xFF40FF, treble_energy);
+                current_colors[9] = scale_color(active_palette.m1_bot_treble, treble_energy);
             }
 
         } else if (current_mode == 2) {
@@ -1283,14 +1564,14 @@ void main_loop(long argc, char **argv) {
                 int bass_ratio = (total_bass * 100) / sum_all;
                 int treble_ratio = (total_treble * 100) / sum_all;
                 if (bass_ratio > 50) {
-                    active_color = blend_color(0x0000FF, 0x0080FF, (100 - bass_ratio) * 2);
+                    active_color = blend_color(active_palette.m2_bass_color, active_palette.m2_mid_color, (100 - bass_ratio) * 2);
                 } else if (treble_ratio > 35) {
-                    active_color = blend_color(0xFFFF00, 0xFF0080, treble_ratio * 2);
+                    active_color = blend_color(active_palette.m2_mid_color, active_palette.m2_treble_color, treble_ratio * 2);
                 } else {
-                    active_color = blend_color(0x00FF40, 0x00B5FF, 50);
+                    active_color = active_palette.m2_mid_color;
                 }
             } else {
-                active_color = 0x0055FF;
+                active_color = active_palette.m2_mid_color;
             }
 
             /* 渲染左翼 */
@@ -1298,9 +1579,9 @@ void main_loop(long argc, char **argv) {
                 if (step <= spread_l) {
                     current_colors[step] = active_color;
                 } else if (step == peak_l && peak_l > spread_l && peak_l > 0) {
-                    current_colors[step] = C_WHITE;
+                    current_colors[step] = active_palette.m2_peak_color;
                 } else {
-                    current_colors[step] = C_BASE;
+                    current_colors[step] = active_palette.m2_bg_color;
                 }
             }
 
@@ -1310,17 +1591,17 @@ void main_loop(long argc, char **argv) {
                 if (step <= spread_r) {
                     current_colors[idx] = active_color;
                 } else if (step == peak_r && peak_r > spread_r && peak_r > 0) {
-                    current_colors[idx] = C_WHITE;
+                    current_colors[idx] = active_palette.m2_peak_color;
                 } else {
-                    current_colors[idx] = C_BASE;
+                    current_colors[idx] = active_palette.m2_bg_color;
                 }
             }
 
             current_colors[0] = active_color;
             if (spread_l >= 8 && spread_r >= 8) {
-                current_colors[9] = C_WHITE;
+                current_colors[9] = active_palette.m2_peak_color;
             } else {
-                current_colors[9] = C_BASE;
+                current_colors[9] = active_palette.m2_bg_color;
             }
 
         } else if (current_mode == 3) {
