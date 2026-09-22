@@ -138,7 +138,7 @@ mode={shlex.quote(requested_mode)}
 brightness={shlex.quote(requested_brightness)}
 mode=${{mode:-$old_mode}}
 brightness=${{brightness:-$old_brightness}}
-case "$mode" in 1|2|auto) ;; *) echo 'Invalid saved mode' >&2; exit 2;; esac
+"$destination/led_music_oh2p" --check-mode "$mode" || {{ echo 'Unsupported visualizer mode' >&2; exit 2; }}
 case "$brightness" in ''|*[!0-9]*) exit 2;; esac
 [ -z "$extra" ] && [ "$brightness" -ge 1 ] && [ "$brightness" -le 100 ]
 {hook}
@@ -171,12 +171,18 @@ if {"true" if start else "false"}; then sh "$root/service-oh2p.sh" status; fi
 """
 
 
+def mode_argument(value):
+    if value != "auto" and not re.fullmatch(r"[1-9][0-9]*", value):
+        raise argparse.ArgumentTypeError("模式应为正整数或 auto；支持范围由所部署的程序校验")
+    return value
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host", nargs="?", help="音箱 IP 或 SSH 别名；省略时交互输入（以 root 连接）")
     parser.add_argument("--source-dir", type=Path, default=Path(__file__).resolve().parent)
     parser.add_argument("--temporary", action="store_true", help="仅使用 /tmp，不设置开机自启")
-    parser.add_argument("--mode", choices=("1", "2", "auto"), help="默认保留已有配置，首次为 auto")
+    parser.add_argument("--mode", type=mode_argument, metavar="N|auto", help="模式编号或 auto；默认保留已有配置，首次为 auto")
     parser.add_argument("--brightness", type=int, choices=range(1, 101), metavar="1..100")
     parser.add_argument("--no-autostart", action="store_true", help="不启用开机自启")
     parser.add_argument("--no-start", action="store_true", help="安装后暂不启动后台服务")

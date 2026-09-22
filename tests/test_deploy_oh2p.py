@@ -14,6 +14,13 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentGuardTests(unittest.TestCase):
+    def test_mode_argument_does_not_duplicate_engine_mode_list(self):
+        for mode in ("auto", "1", "3", "4", "99"):
+            self.assertEqual(deploy.mode_argument(mode), mode)
+        for mode in ("0", "01", "-1", "1;echo", "", "automatic"):
+            with self.assertRaises(deploy.argparse.ArgumentTypeError):
+                deploy.mode_argument(mode)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

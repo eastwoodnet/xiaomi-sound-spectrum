@@ -43,7 +43,7 @@ load_options() {
     if [ -f "$base/options" ]; then
         read mode brightness extra < "$base/options" || return 1
     fi
-    case "$mode" in 1|2|auto) ;; *) return 1;; esac
+    "$self_dir/led_music_oh2p" --check-mode "$mode" || return 1
     case "$brightness" in ''|*[!0-9]*) return 1;; esac
     [ -z "$extra" ] && [ "$brightness" -ge 1 ] && [ "$brightness" -le 100 ]
 }
@@ -100,7 +100,7 @@ worker() {
     stable=0
     status_set waiting
     while :; do
-        sh "$self_dir/run-oh2p.sh" --check >/dev/null 2>&1
+        sh "$self_dir/run-oh2p.sh" --check "$mode" "$brightness" >/dev/null 2>&1
         ready_rc=$?
         if [ "$ready_rc" = 0 ] && [ ! -d /tmp/xiaomi-spectrum-oh2p.lock ]; then
             stable=$((stable+1))
@@ -139,7 +139,7 @@ start_service() {
     fi
     if [ -d "$state_dir" ]; then stop_service || return 1; fi
     load_options || { echo 'Invalid mode/brightness options' >&2; return 2; }
-    sh "$self_dir/run-oh2p.sh" --check >/dev/null 2>&1
+    sh "$self_dir/run-oh2p.sh" --check "$mode" "$brightness" >/dev/null 2>&1
     check_rc=$?
     case "$check_rc" in 0|4) ;; *) echo 'OH2P preflight failed' >&2; return "$check_rc";; esac
     mkdir "$state_dir" || return 1

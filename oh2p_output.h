@@ -9,8 +9,9 @@ static uint32_t oh2p_pixel(const uint32_t *colors, int pixel) {
      * dropping frequency bands or the original white peak indicators.
      * Coordinates use 12 units per virtual pixel, 18 per physical pixel.
      * Physical indices run right -> left. Cut the virtual ring through the
-     * center of pixel 9 (the treble endpoint): its halves reach both outer
-     * ends, while pixel 0 (bass) is shared equally by physical pixels 5/6.
+     * center of pixel 9: its halves reach both outer ends, while pixel 0
+     * is shared equally by physical pixels 5/6. The transform is fixed for
+     * every mode; it does not reinterpret frequency bands or animation type.
      * Ring positions 10..17 reach the right half, 1..8 the left half.
      */
     unsigned r = 0, g = 0, b = 0;

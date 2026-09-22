@@ -450,6 +450,18 @@ static inline int get_band_energy(const int *mags, int b) {
     return max_val;
 }
 
+/* 8 频段自适应动态门限 (弥补高频天然能量滚降) */
+static const int MIN_DIFF[8] = {
+    3000, /* Band 0: Sub-Bass (~47-94 Hz) */
+    3000, /* Band 1: Bass Punch (~141-188 Hz) */
+    2500, /* Band 2: Low Mids (~234-422 Hz) */
+    2000, /* Band 3: Midrange (~469-938 Hz) */
+    1500, /* Band 4: High Mids (~984-2156 Hz) */
+    1200, /* Band 5: Presence (~2.2k-4.5kHz) */
+     800, /* Band 6: Treble (~4.5k-8.4kHz) */
+     600  /* Band 7: Air (~8.5k-15.9kHz) */
+};
+
 /* ================================================================
  * 高保真色彩系统 (BGR 格式: 0xBBGGRR)
  * ================================================================ */
@@ -561,14 +573,288 @@ static inline void set_all_leds(uint32_t color) {
     for (int i = 0; i < 18; i++) current_colors[i] = color;
 }
 
+/* ================================================================
+ * 模式 3: 彩虹熔岩流动 (HSV 色相行波模型)
+ * ================================================================ */
+
+/* 简单 LCG 伪随机数生成器 */
+static uint32_t lava_seed = 12345;
+static inline int lava_rand(int range) {
+    lava_seed = lava_seed * 1103515245 + 12345;
+    int r = (lava_seed >> 16) & 0x7FFF;
+    if (range <= 0) return 0;
+    return (r % range) - range / 2;
+}
+
+/* 整数 HSV -> BGR 转换 (h: 0-359, s: 0-255, v: 0-255) */
+static inline uint32_t hsv_to_bgr(int h, int s, int v) {
+    if (s == 0) return ((uint32_t)v << 16) | ((uint32_t)v << 8) | (uint32_t)v;
+    while (h < 0) h += 360;
+    while (h >= 360) h -= 360;
+    int region = h / 60;
+    int remainder = h - (region * 60);
+    int p = (v * (255 - s)) / 255;
+    int q = (v * (255 - (s * remainder) / 60)) / 255;
+    int t = (v * (255 - (s * (60 - remainder)) / 60)) / 255;
+    int r, g, b;
+    switch (region) {
+        case 0:  r = v; g = t; b = p; break;
+        case 1:  r = q; g = v; b = p; break;
+        case 2:  r = p; g = v; b = t; break;
+        case 3:  r = p; g = q; b = v; break;
+        case 4:  r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+    return ((uint32_t)b << 16) | ((uint32_t)g << 8) | (uint32_t)r;
+}
+
+/* 熔岩状态: 每颗 LED 的色相角 (0-3599, 即 0.0-359.9 度 x10) */
+static int lava_hue[18];
+static int lava_initialized = 0;
+
+static void render_lava(int *level_l, int *level_r) {
+    /* 初始化: 均匀分布色相 + 随机偏移 */
+    if (!lava_initialized) {
+        for (int i = 0; i < 18; i++) {
+            lava_hue[i] = (i * 200) + lava_rand(200) + 100;
+            while (lava_hue[i] < 0) lava_hue[i] += 3600;
+            while (lava_hue[i] >= 3600) lava_hue[i] -= 3600;
+        }
+        lava_initialized = 1;
+    }
+
+    /* 低频 (Band 0+1) 驱动旋转速度 */
+    int bass_l = (level_l[0] * 2 + level_l[1]) / 3;
+    int bass_r = (level_r[0] * 2 + level_r[1]) / 3;
+    int bass = (bass_l + bass_r) / 2;
+    int base_speed = 3 + bass / 8;  /* 3 ~ 15 (单位: 0.1度/帧) */
+
+    /* 中频 (Band 2-5) 影响饱和度 */
+    int mid_energy = (level_l[2] + level_r[2] + level_l[3] + level_r[3]
+                    + level_l[4] + level_r[4] + level_l[5] + level_r[5]) / 8;
+    int saturation = 180 + mid_energy * 75 / 100;  /* 180 ~ 255 */
+    if (saturation > 255) saturation = 255;
+
+    /* 高频 (Band 6+7) 亮度脉冲 */
+    int treble = (level_l[6] + level_r[6] + level_l[7] + level_r[7]) / 4;
+    int brightness_boost = 0;
+    if (treble > 60) brightness_boost = (treble - 60) * 3 / 2;  /* 0 ~ 60 */
+    if (brightness_boost > 60) brightness_boost = 60;
+
+    /* 全频段均值 -> 基础亮度 */
+    int total = 0;
+    for (int b = 0; b < 8; b++) total += (level_l[b] + level_r[b]);
+    int avg = total / 16;  /* 0-100 */
+    int base_brightness = 100 + avg * 120 / 100;  /* 100 ~ 220 */
+    if (base_brightness > 220) base_brightness = 220;
+
+    /* 保存旧色相用于 Jacobi 式对称更新 */
+    int old_hue[18];
+    for (int i = 0; i < 18; i++) old_hue[i] = lava_hue[i];
+
+    for (int i = 0; i < 18; i++) {
+        int left_idx = (i + 17) % 18;
+        int right_idx = (i + 1) % 18;
+
+        /* 色相旋转: 基础速度 + 随机微扰 */
+        lava_hue[i] = old_hue[i] + base_speed + lava_rand(6);
+
+        /* 邻域相位耦合: 向邻居平均色相方向偏移 */
+        int h_left = old_hue[left_idx];
+        int h_right = old_hue[right_idx];
+        /* 处理环绕: 确保差值在 [-1800, 1800] 范围 */
+        int diff_left = h_left - old_hue[i];
+        if (diff_left > 1800) diff_left -= 3600;
+        if (diff_left < -1800) diff_left += 3600;
+        int diff_right = h_right - old_hue[i];
+        if (diff_right > 1800) diff_right -= 3600;
+        if (diff_right < -1800) diff_right += 3600;
+        int coupling = (diff_left + diff_right) / 8;  /* 柔和耦合 */
+        lava_hue[i] += coupling;
+
+        /* 规范化到 [0, 3600) */
+        while (lava_hue[i] < 0) lava_hue[i] += 3600;
+        while (lava_hue[i] >= 3600) lava_hue[i] -= 3600;
+
+        /* 亮度: 基础 + 高频脉冲 + 微量随机 */
+        int v = base_brightness + brightness_boost + lava_rand(20);
+        if (v < 30) v = 30;
+        if (v > 220) v = 220;
+
+        /* 对称立体声微调: 左半环偏左声道亮度, 右半环偏右声道 */
+        int stereo_boost = 0;
+        if (i >= 1 && i <= 8) {
+            stereo_boost = (bass_l - bass_r) / 4;
+        } else if (i >= 10 && i <= 17) {
+            stereo_boost = (bass_r - bass_l) / 4;
+        }
+        v += stereo_boost;
+        if (v < 30) v = 30;
+        if (v > 220) v = 220;
+
+        current_colors[i] = hsv_to_bgr(lava_hue[i] / 10, saturation, v);
+    }
+}
+
+/* ================================================================
+ * 模式 4: 18 频段专业声学连续色谱 + 峰值非线性动力学
+ *
+ * 物理与声学几何 (经过物理标定实测):
+ * - 0 号位于音箱【最后面】(电源线插孔处)
+ * - 8 与 9 号位于音箱【最前面】(小爱 Logo 处)
+ * - 顺时针环形走向: 0(后) -> 1..7(左) -> 8,9(前) -> 10..16(右) -> 17(后)
+ *
+ * 18 频段声学分配 (精准 1/3 倍频程等比对数划分):
+ * - #0:  ~47-94 Hz    (LED 0,  后)   -> 0°   (深红)      [Sub-bass / 808重低音]
+ * - #1:  ~94-141 Hz   (LED 1,  左)   -> 20°  (赤橙)      [底鼓打击力 Kick Punch]
+ * - #2:  ~141-188 Hz  (LED 2,  左)   -> 40°  (金橙)      [贝斯弹拨与军鼓基音]
+ * - #3:  ~188-281 Hz  (LED 3,  左)   -> 60°  (琥珀黄)    [温暖中低频 Low Mids]
+ * - #4:  ~281-375 Hz  (LED 4,  左)   -> 80°  (黄绿)      [男声下潜与鼓腔共振]
+ * - #5:  ~375-516 Hz  (LED 5,  左)   -> 100° (青绿)      [国际标准基音 A4 / 钢琴核心]
+ * - #6:  ~516-703 Hz  (LED 6,  左)   -> 120° (纯绿)      [主唱人声基频核心]
+ * - #7:  ~703-984 Hz  (LED 7,  左)   -> 140° (碧绿)      [人声共鸣与中频乐器]
+ * - #8:  ~984-1.36kHz (LED 8,  最前) -> 160° (青翠)      [人声黄金区 / 旋律核心 A5]
+ * - #9:  ~1.36-1.88k  (LED 9,  最前) -> 180° (赛博青)    [人声咬字清晰度 / 齿音上沿]
+ * - #10: ~1.88-2.58k  (LED 10, 右)   -> 200° (天青蓝)    [吉他失真泛音 / 军鼓脆响]
+ * - #11: ~2.58-3.61k  (LED 11, 右)   -> 220° (湛蓝)      [军鼓击打瞬态 / 瞬时咬合]
+ * - #12: ~3.61-5.02k  (LED 12, 右)   -> 240° (正蓝)      [人耳临界敏感区 Presence]
+ * - #13: ~5.02-6.98k  (LED 13, 右)   -> 260° (靛蓝)      [踩镲清晰度 / 金属打击]
+ * - #14: ~6.98-9.75k  (LED 14, 右)   -> 280° (霓虹紫)    [镲片泛音 / 明亮高频]
+ * - #15: ~9.75-13.6k  (LED 15, 右)   -> 300° (洋红)      [极高频通透度 Brilliance]
+ * - #16: ~13.6-17.8k  (LED 16, 右)   -> 320° (玫瑰红)    [吊镲空气感 Air Band]
+ * - #17: ~17.8-20.6k  (LED 17, 后)   -> 340° (深绯红)    [超高频声场空间延展, 与0号闭合]
+ *
+ * 峰值非线性动力学:
+ * 1. 频段全自动动态校准 (去除非对称死锁门限, 彻底激活 0-8 低中频段)
+ * 2. 灵动响应门限 (Threshold = 18): 过滤极微弱底噪, 乐曲起伏即刻律动
+ * 3. 峰值跃迁变色 (+120° 大跨度跃迁, 饱和度脱色白炽化, >75 混入纯白爆闪)
+ * ================================================================ */
+static const struct {
+    int start_bin;
+    int end_bin;
+    int min_diff;
+} BANDS_18[18] = {
+    {   1,   1, 3000 }, /* #0:  ~55 Hz   (Bin 1: 46.9 Hz) - Sub-Bass */
+    {   2,   2, 3000 }, /* #1:  ~77 Hz   (Bin 2: 93.8 Hz) - Kick Sub */
+    {   2,   3, 2800 }, /* #2:  ~110 Hz  (Bin 2-3: 94-141 Hz) - Kick Punch */
+    {   3,   4, 2500 }, /* #3:  ~156 Hz  (Bin 3-4: 141-188 Hz) - Body/Bass */
+    {   4,   6, 2200 }, /* #4:  ~220 Hz  (Bin 4-6: 188-281 Hz) - Low Mids / A3 */
+    {   6,   8, 2000 }, /* #5:  ~311 Hz  (Bin 6-8: 281-375 Hz) - Snare Body */
+    {   8,  11, 1800 }, /* #6:  ~440 Hz  (Bin 8-11: 375-516 Hz) - Standard A4 */
+    {  11,  16, 1600 }, /* #7:  ~622 Hz  (Bin 11-16: 516-750 Hz) - Vocal Fundamental */
+    {  16,  22, 1400 }, /* #8:  ~880 Hz  (Bin 16-22: 750-1031 Hz) - Vocal Core / A5 */
+    {  22,  32, 1200 }, /* #9:  ~1.2 kHz (Bin 22-32: 1031-1500 Hz) - Vocal Clarity */
+    {  32,  45, 1000 }, /* #10: ~1.8 kHz (Bin 32-45: 1500-2109 Hz) - Lead/Synth */
+    {  45,  64,  900 }, /* #11: ~2.5 kHz (Bin 45-64: 2109-3000 Hz) - Snare Crack */
+    {  64,  90,  800 }, /* #12: ~3.5 kHz (Bin 64-90: 3000-4219 Hz) - Presence Peak */
+    {  90, 128,  700 }, /* #13: ~5.0 kHz (Bin 90-128: 4219-6000 Hz) - High Presence */
+    { 128, 181,  600 }, /* #14: ~7.0 kHz (Bin 128-181: 6000-8484 Hz) - Cymbals/Shimmer */
+    { 181, 256,  500 }, /* #15: ~10.0 kHz (Bin 181-256: 8484-12000 Hz) - Hi-Hats */
+    { 256, 362,  400 }, /* #16: ~14.0 kHz (Bin 256-362: 12000-16969 Hz) - Air Band */
+    { 362, 440,  350 }  /* #17: ~20.0 kHz (Bin 362-440: 16969-20625 Hz) - Top Air */
+};
+
+static int high_18[18];
+static int low_18[18];
+static int level_18[18];
+static int inited_18 = 0;
+
+static void render_spectrum(const int *left_mags, const int *right_mags) {
+    if (!inited_18) {
+        for (int i = 0; i < 18; i++) {
+            high_18[i] = BANDS_18[i].min_diff * 2;
+            low_18[i] = 100;
+            level_18[i] = 0;
+        }
+        inited_18 = 1;
+    }
+
+    for (int b = 0; b < 18; b++) {
+        int start = BANDS_18[b].start_bin;
+        int end = BANDS_18[b].end_bin;
+        int max_e = 0;
+        for (int i = start; i <= end; i++) {
+            if (left_mags[i] > max_e) max_e = left_mags[i];
+            if (right_mags[i] > max_e) max_e = right_mags[i];
+        }
+
+        /* 自适应增益追踪 (Attack 即时, Decay 柔和) */
+        if (max_e > high_18[b]) high_18[b] = max_e;
+        else high_18[b] = (high_18[b] * 199 + max_e) / 200;
+
+        if (max_e < low_18[b]) low_18[b] = max_e;
+        else low_18[b] = (low_18[b] * 199 + max_e) / 200;
+
+        int diff = high_18[b] - low_18[b];
+        if (diff < BANDS_18[b].min_diff) diff = BANDS_18[b].min_diff;
+
+        int raw = 0;
+        if (max_e > low_18[b]) {
+            raw = ((long)(max_e - low_18[b]) * 100) / diff;
+            if (raw > 100) raw = 100;
+        }
+
+        /* 快速捕捉瞬态，平滑释放 */
+        if (raw >= level_18[b]) level_18[b] = raw;
+        else level_18[b] = (level_18[b] * 84) / 100;
+
+        int lev = level_18[b];
+
+        /* 峰值非线性门限过滤: lev < 32 属于底电平/伴奏背景，不触发律动抖动 */
+        int peak_act = 0;
+        if (lev > 32) {
+            int norm = ((lev - 32) * 100) / 68; /* 0 ~ 100 */
+            peak_act = (norm * norm) / 100;    /* 二次方非线性幂律放大 0 ~ 100 */
+        }
+
+        /* 18 颗连续色谱基准色相: 360° 均匀分为 18 份，步长 20.0° (200) */
+        int h_base = b * 200;
+
+        /* 峰值触发色相向高能互补方向大角度跃迁 (+120.0°) */
+        int h_shift = (peak_act * 1200) / 100;
+        int h = h_base + h_shift;
+        while (h >= 3600) h -= 3600;
+
+        /* 峰值脱色白炽化 */
+        int sat = 245;
+        if (peak_act > 40) {
+            sat = 245 - ((peak_act - 40) * 155) / 60;
+            if (sat < 85) sat = 85;
+        }
+
+        /* 亮度: 恒定温润底光 (95, ~38%) 保持彩虹环完整，峰值跃迁至 220 */
+        int val = 95 + (peak_act * 125) / 100;
+        if (val > 220) val = 220;
+
+        uint32_t color = hsv_to_bgr(h / 10, sat, val);
+
+        /* 强峰值瞬态白光爆闪 (>78) */
+        if (peak_act > 78) {
+            int white_mix = (peak_act - 78) * 4;
+            if (white_mix > 80) white_mix = 80;
+            color = blend_color(color, C_WHITE, white_mix);
+        }
+
+        /* 逆时针旋转 90 度 (4 颗灯珠偏移): 将高动态活跃区对称居中移至正前方 (8, 9 号灯珠) */
+        int target_led = (b - 4 + 18) % 18;
+        current_colors[target_led] = color;
+    }
+}
+
 static void log_mode(int mode) {
     int fd = sys_openat(AT_FDCWD, PATH_MODE_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
         if (mode == 1) {
             static const char m[] = "模式 1: 双翼 8 频段真·声学均衡器 (纯硬件 FFT 驱动)\n";
             sys_write(fd, m, sizeof(m) - 1);
-        } else {
+        } else if (mode == 2) {
             static const char m[] = "模式 2: 重低音大动态立体声律动 (动态色温 + 峰值悬停)\n";
+            sys_write(fd, m, sizeof(m) - 1);
+        } else if (mode == 3) {
+            static const char m[] = "模式 3: 彩虹熔岩流动 (HSV 色相行波)\n";
+            sys_write(fd, m, sizeof(m) - 1);
+        } else {
+            static const char m[] = "模式 4: 全频律动 (18 频段连续色谱与峰值动力学)\n";
             sys_write(fd, m, sizeof(m) - 1);
         }
         sys_close(fd);
@@ -641,12 +927,35 @@ static int right_mags[FFT_N >> 1];
 #define STATE_PAUSED  2
 
 /* ---------------- 核心主循环 ---------------- */
+#ifdef DEVICE_OH2P
+static int oh2p_arg_equal(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+#endif
+
 void main_loop(long argc, char **argv) {
     int current_mode = 1;
     int auto_cycle = 1;
 
 #ifdef DEVICE_OH2P
-    /* The OH2P wrapper validates mode. Optional brightness: integer 1..100. */
+    /* Validate through the shared mode selector, before opening any hardware.
+     * Launchers use this query instead of maintaining their own mode lists. */
+    int check_mode = argc >= 2 && oh2p_arg_equal(argv[1], "--check-mode");
+    if (check_mode) {
+        if (argc != 3) sys_exit(2);
+        argc--; argv++;
+    }
+    int requested_mode = 0;
+    if (argc >= 2 && !oh2p_arg_equal(argv[1], "auto")) {
+        const char *p = argv[1];
+        if (*p < '1' || *p > '9') sys_exit(2);
+        while (*p) {
+            if (*p < '0' || *p > '9' || requested_mode > 100000) sys_exit(2);
+            requested_mode = requested_mode * 10 + *p++ - '0';
+        }
+    }
+    /* Optional brightness: integer 1..100. */
     if (argc > 3) sys_exit(2);
     if (argc == 3) {
         int value = 0;
@@ -664,8 +973,15 @@ void main_loop(long argc, char **argv) {
     if (argc >= 2 && argv[1]) {
         if (argv[1][0] == '1') { current_mode = 1; auto_cycle = 0; }
         else if (argv[1][0] == '2') { current_mode = 2; auto_cycle = 0; }
+        else if (argv[1][0] == '3') { current_mode = 3; auto_cycle = 0; }
+        else if (argv[1][0] == '4') { current_mode = 4; auto_cycle = 0; }
         else if (argv[1][0] == 'a') { auto_cycle = 1; }
     }
+
+#ifdef DEVICE_OH2P
+    if (requested_mode && (auto_cycle || current_mode != requested_mode)) sys_exit(2);
+    if (check_mode) sys_exit(0);
+#endif
 
     /* 1. 初始化 AW20054 渐变时间 */
 #ifndef DEVICE_OH2P
@@ -846,8 +1162,9 @@ void main_loop(long argc, char **argv) {
             if (el < low_l[b]) low_l[b] = el;
             else low_l[b] = (low_l[b] * 199 + el) / 200;
 
+            int min_d = MIN_DIFF[b];
             int diff_l = high_l[b] - low_l[b];
-            if (diff_l < 3000) diff_l = 3000;
+            if (diff_l < min_d) diff_l = min_d;
 
             int raw_l = 0;
             if (el > low_l[b]) {
@@ -866,7 +1183,7 @@ void main_loop(long argc, char **argv) {
             else low_r[b] = (low_r[b] * 199 + er) / 200;
 
             int diff_r = high_r[b] - low_r[b];
-            if (diff_r < 3000) diff_r = 3000;
+            if (diff_r < min_d) diff_r = min_d;
 
             int raw_r = 0;
             if (er > low_r[b]) {
@@ -887,7 +1204,7 @@ void main_loop(long argc, char **argv) {
             mode_frame_counter++;
             if (mode_frame_counter >= 2800) { /* ~60秒轮换 */
                 mode_frame_counter = 0;
-                current_mode = (current_mode == 1) ? 2 : 1;
+                current_mode = (current_mode >= 4) ? 1 : current_mode + 1;
                 log_mode(current_mode);
             }
         }
@@ -943,7 +1260,7 @@ void main_loop(long argc, char **argv) {
                 current_colors[9] = scale_color(0xFF40FF, treble_energy);
             }
 
-        } else {
+        } else if (current_mode == 2) {
             /* ===========================================================
              * 模式 2: 重低音大动态立体声律动 (动态色温 + 峰值悬停)
              * 重低音控制灯条延伸展翼长度 (从顶部 0 向下延伸至 8 与 10)
@@ -1017,6 +1334,19 @@ void main_loop(long argc, char **argv) {
             } else {
                 current_colors[9] = C_BASE;
             }
+
+        } else if (current_mode == 3) {
+            /* ===========================================================
+             * 模式 3: 彩虹熔岩流动 (HSV 色相行波模型)
+             * 全 RGB 色域流动, 低频驱动旋转, 高频脉冲闪烁
+             * =========================================================== */
+            render_lava(level_l, level_r);
+
+        } else {
+            /* ===========================================================
+             * 模式 4: 18 频段连续色谱 (峰值非线性动力学)
+             * =========================================================== */
+            render_spectrum(left_mags, right_mags);
         }
 
         /* 提交差量 I2C 硬件写入 (Deadband >= 6) */

@@ -84,10 +84,11 @@ def deploy():
 
         # 停止所有旧服务与残留进程
         chan = transport.open_session()
-        chan.exec_command("killall -9 led_guard.sh led_music music_smooth.sh arecord 2>/dev/null")
+        chan.exec_command("killall -9 led_guard.sh led_music music_smooth.sh arecord mosquitto_sub 2>/dev/null")
         time.sleep(1)
         chan.close()
 
+        # 上传二进制
         print("[*] 正在上传 aarch64 原生高帧率程序 led_music 到音箱 /data/led_music ...")
         with open(bin_path, "rb") as f:
             content = f.read()
@@ -100,6 +101,28 @@ def deploy():
         chan.close()
         print("[+] 原生二进制上传完毕并赋予可执行权限。")
 
+        # 检查并上传 MQTT 配置文件
+        conf_path = os.path.join(os.path.dirname(__file__), "mqtt.conf")
+        if os.path.exists(conf_path):
+            chan = transport.open_session()
+            chan.exec_command("[ -f /data/mqtt.conf ] && echo EXISTS || echo NO")
+            res = chan.makefile().read().decode().strip()
+            chan.close()
+            if res == "EXISTS":
+                print("[i] 音箱已存在 /data/mqtt.conf，保留当前设备网络与认证配置不变。")
+            else:
+                print("[*] 正在上传默认 MQTT 配置文件 mqtt.conf 到音箱 /data/mqtt.conf ...")
+                with open(conf_path, "rb") as f:
+                    conf_content = f.read()
+                chan = transport.open_session()
+                chan.exec_command("cat > /data/mqtt.conf")
+                chan.sendall(conf_content)
+                chan.shutdown_write()
+                time.sleep(1)
+                chan.close()
+                print("[+] MQTT 配置文件 /data/mqtt.conf 创建完毕。")
+
+        # 上传守护脚本
         guard_path = os.path.join(os.path.dirname(__file__), "led_guard.sh")
         if os.path.exists(guard_path):
             print("[*] 正在上传智能声光律动守护脚本 led_guard.sh 到音箱 /data/led_guard.sh ...")
@@ -113,6 +136,7 @@ def deploy():
             chan.close()
             print("[+] 守护脚本上传完毕并赋予可执行权限。")
 
+        # 配置开机自启
         print("[*] 正在配置开机自启 /data/init.sh (断电重启自动保持)...")
         chan = transport.open_session()
         chan.exec_command("""cat << 'EOF' > /data/init.sh
@@ -121,7 +145,7 @@ def deploy():
 /etc/init.d/led start 2>/dev/null
 
 # 2. 终止残留守护进程
-killall -9 led_guard.sh 2>/dev/null
+killall -9 led_guard.sh mosquitto_sub 2>/dev/null
 
 # 3. 启动智能声光律动后台守护服务
 if [ -f /data/led_guard.sh ]; then
@@ -134,7 +158,8 @@ chmod +x /data/init.sh
         chan.close()
         print("[+] 开机持久化自启配置完成！")
 
-        print("[*] 正在启动智能声光律动守护服务 (3秒轮询检测 / 放歌自动律动 / 闲置还原官方)...")
+        # 启动守护服务
+        print("[*] 正在启动智能声光律动守护服务 (包含 Home Assistant MQTT 客户端监听)...")
         chan = transport.open_session()
         chan.exec_command("/data/led_guard.sh >/dev/null 2>&1 &")
         time.sleep(2)
@@ -142,7 +167,7 @@ chmod +x /data/init.sh
 
         # 检查进程状态
         chan = transport.open_session()
-        chan.exec_command("ps | grep -E 'led_guard|ledserver|led_music'; ubus call mediaplayer player_get_play_status 2>/dev/null")
+        chan.exec_command("ps | grep -E 'led_guard|mosquitto_sub|ledserver|led_music'; ubus call mediaplayer player_get_play_status 2>/dev/null")
         time.sleep(1)
         out = b""
         while chan.recv_ready():
@@ -152,11 +177,15 @@ chmod +x /data/init.sh
         chan.close()
 
         print("\n" + "="*60)
-        print("🎉 恭喜！小米 Sound 智能动态声光律动系统 (v1.0-beta2) 部署成功！")
+        print("🎉 恭喜！小米 Sound 智能动态声光律动系统 + HA MQTT 远端控制部署成功！")
         print("• 智能守护: 每 3 秒自动通过 ubus 监测音乐播放状态")
         print("• 音乐播放: 自动切入原生 1024点 FFT 震撼音乐律动")
         print("• 音乐停止/闲置: 自动切回官方 ledserver，100% 恢复呼唤小爱光环与音量交互")
         print("• 麦克风保护: 闲置时绝不抢占麦克风，说话走动绝不误闪乱动")
+        print("• Home Assistant MQTT 自动发现已启用:")
+        print("  - 模式选择: select.xiaomi_sound_l06a_led_mode")
+        print("  - 律动开关: switch.xiaomi_sound_l06a_visualizer_switch")
+        print("  - 运行状态: sensor.xiaomi_sound_l06a_current_mode")
         print("• 持久自启: 开机自启 /data/init.sh 已永久生效，断电重启不丢失")
         print("="*60)
 

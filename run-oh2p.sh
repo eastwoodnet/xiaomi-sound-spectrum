@@ -6,19 +6,20 @@ if [ "${1:-}" = --check ]; then check_only=1; shift; fi
 mode=${1:-auto}
 brightness=${2:-20}
 duration=${3:-0}
-case "$mode" in 1|2|auto) ;; *) echo 'Mode must be 1, 2 or auto' >&2; exit 2;; esac
 case "$brightness" in ''|*[!0-9]*) exit 2;; esac
 case "$duration" in ''|*[!0-9]*) exit 2;; esac
 [ "$brightness" -ge 1 ] && [ "$brightness" -le 100 ] || exit 2
 [ "$duration" -ge 0 ] && [ "$duration" -le 3600 ] || exit 2
 [ "$#" -le 3 ] || exit 2
 
+cd "$(dirname "$0")" || exit 3
+[ -x ./led_music_oh2p ] || { echo 'Build/download led_music_oh2p first' >&2; exit 3; }
+./led_music_oh2p --check-mode "$mode" || { echo 'Unsupported visualizer mode' >&2; exit 2; }
+
 [ "$(micocfg_model 2>/dev/null)" = OH2P ] || { echo 'Requires OH2P' >&2; exit 3; }
 grep -q 'Ver:1\.62\.2[[:space:]]*$' /etc/banner || { echo 'Only firmware 1.62.2 has been checked' >&2; exit 3; }
 [ -w /sys/devices/i2c-2/2-0034/led_rgb ] || exit 3
 [ -x /usr/bin/arecord ] || exit 3
-cd "$(dirname "$0")" || exit 3
-[ -x ./led_music_oh2p ] || { echo 'Build/download led_music_oh2p first' >&2; exit 3; }
 . /usr/share/libubox/jshn.sh || exit 3
 # Do not use set -u: factory jshn references optional unset variables.
 

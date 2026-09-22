@@ -24,13 +24,17 @@ class ServiceTests(unittest.TestCase):
         self.version.mkdir()
         self.service = self.version / "service-oh2p.sh"
         shutil.copyfile(REPO / "service-oh2p.sh", self.service)
+        self.binary = self.version / "led_music_oh2p"
+        self.binary.write_text('#!/bin/sh\n[ "$1" = --check-mode ] || exit 2\n'
+                               'case "$2" in auto|1|2|3|4|99) exit 0;; *) exit 2;; esac\n')
+        self.binary.chmod(0o755)
         self.ready = self.base / "ready"
         self.events = self.base / "events"
         self.helper = self.version / "run-oh2p.sh"
         self.helper.write_text(
             '#!/bin/sh\nbase=$(dirname "$(dirname "$0")")\n'
             'if [ "${1:-}" = --check ]; then [ -f "$base/ready" ] && exit 0; exit 4; fi\n'
-            'echo "$$" >> "$base/events"\n'
+            'echo "$$ $1" >> "$base/events"\n'
             "trap 'exit 0' TERM INT HUP\n"
             'while [ -f "$base/ready" ]; do sleep 0.1; done\n')
         self.assertFalse(STATE.exists(), "Do not interfere with an existing service")
@@ -91,6 +95,19 @@ class ServiceTests(unittest.TestCase):
         (STATE / "child").write_text(f"{unrelated.pid} 0\n")
         self.assertEqual(self.call("stop").returncode, 0)
         self.assertIsNone(unrelated.poll())
+        self.assertFalse(STATE.exists())
+
+    def test_mode_support_is_delegated_to_installed_binary(self):
+        (self.base / "options").write_text("99 20\n")
+        self.ready.touch()
+        self.assertEqual(self.call("start").returncode, 0)
+        self.wait_for(lambda: self.events.exists())
+        self.assertEqual(self.events.read_text().split()[1], "99")
+
+    def test_unsupported_mode_does_not_start_service(self):
+        (self.base / "options").write_text("5 20\n")
+        self.assertNotEqual(self.call("start").returncode, 0)
+        self.assertFalse(self.events.exists())
         self.assertFalse(STATE.exists())
 
 
