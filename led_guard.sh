@@ -73,7 +73,7 @@ send_ha_discovery() {
     
     # 1. 注册 Select 实体: 律动模式选择器
     local disc_select="homeassistant/select/xiaomi_sound_l06a/led_mode/config"
-    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","模式 5: 极速光轮","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound Light","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-release"}}'
+    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 天使之翼","模式 2: 低音怒火","模式 3: 流动熔岩","模式 4: 全频律动","模式 5: 极速光轮","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound Light","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-release"}}'
     mqtt_pub -t "$disc_select" -m "$payload_select" -r
 
     # 2. 注册 Switch 实体: 律动总开关
@@ -168,20 +168,20 @@ switch_mode_action() {
 handle_mode_command() {
     local cmd="$1"
     case "$cmd" in
-        "1"|*"模式 1"*)
+        "1"|*"模式 1"*|*"天使之翼"*)
             echo "1" > /data/led_mode
             switch_mode_action "1"
-            report_state "模式 1: 双翼声学均衡器" "ON" "模式 1: 双翼声学均衡器"
+            report_state "模式 1: 天使之翼" "ON" "模式 1: 天使之翼"
             ;;
-        "2"|*"模式 2"*)
+        "2"|*"模式 2"*|*"低音怒火"*)
             echo "2" > /data/led_mode
             switch_mode_action "2"
-            report_state "模式 2: 重低音大动态立体声律动" "ON" "模式 2: 重低音大动态立体声律动"
+            report_state "模式 2: 低音怒火" "ON" "模式 2: 低音怒火"
             ;;
-        "3"|*"模式 3"*)
+        "3"|*"模式 3"*|*"流动熔岩"*|*"彩虹熔岩"*)
             echo "3" > /data/led_mode
             switch_mode_action "3"
-            report_state "模式 3: 彩虹熔岩流动" "ON" "模式 3: 彩虹熔岩流动"
+            report_state "模式 3: 流动熔岩" "ON" "模式 3: 流动熔岩"
             ;;
         "4"|*"模式 4"*)
             echo "4" > /data/led_mode
@@ -217,9 +217,9 @@ mqtt_worker() {
             if [ -f /data/led_mode ]; then
                 cur_val=$(cat /data/led_mode 2>/dev/null | tr -d ' \n\r')
                 case "$cur_val" in
-                    1) cur_name="模式 1: 双翼声学均衡器" ;;
-                    2) cur_name="模式 2: 重低音大动态立体声律动" ;;
-                    3) cur_name="模式 3: 彩虹熔岩流动" ;;
+                    1) cur_name="模式 1: 天使之翼" ;;
+                    2) cur_name="模式 2: 低音怒火" ;;
+                    3) cur_name="模式 3: 流动熔岩" ;;
                     4) cur_name="模式 4: 全频律动" ;;
                     5) cur_name="模式 5: 极速光轮" ;;
                     off) cur_name="关闭律动 (恢复官方)"; pwr_state="OFF"; cur_active="已关闭" ;;
@@ -467,9 +467,9 @@ while true; do
                 last_vmode="$vmode_now"
                 cur_disp=""
                 case "$vmode_now" in
-                    *"模式 1"*) cur_disp="模式 1: 双翼声学均衡器" ;;
-                    *"模式 2"*) cur_disp="模式 2: 重低音大动态立体声律动" ;;
-                    *"模式 3"*) cur_disp="模式 3: 彩虹熔岩流动" ;;
+                    *"模式 1"*|*"天使之翼"*) cur_disp="模式 1: 天使之翼" ;;
+                    *"模式 2"*|*"低音怒火"*) cur_disp="模式 2: 低音怒火" ;;
+                    *"模式 3"*|*"流动熔岩"*|*"彩虹熔岩"*) cur_disp="模式 3: 流动熔岩" ;;
                     *"模式 4"*) cur_disp="模式 4: 全频律动" ;;
                     *"模式 5"*|*"极速光轮"*) cur_disp="模式 5: 极速光轮" ;;
                     *) cur_disp="$vmode_now" ;;

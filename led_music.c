@@ -1300,13 +1300,13 @@ static void log_mode(int mode) {
     int fd = sys_openat(AT_FDCWD, PATH_MODE_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
         if (mode == 1) {
-            static const char m[] = "模式 1: 双翼 8 频段真·声学均衡器 (纯硬件 FFT 驱动)\n";
+            static const char m[] = "模式 1: 天使之翼 (双翼 8 频段真·声学均衡器)\n";
             sys_write(fd, m, sizeof(m) - 1);
         } else if (mode == 2) {
-            static const char m[] = "模式 2: 重低音大动态立体声律动 (动态色温 + 峰值悬停)\n";
+            static const char m[] = "模式 2: 低音怒火 (前置爆发双翼展开 + 动态色温)\n";
             sys_write(fd, m, sizeof(m) - 1);
         } else if (mode == 3) {
-            static const char m[] = "模式 3: 彩虹熔岩流动 (HSV 色相行波)\n";
+            static const char m[] = "模式 3: 流动熔岩 (HSV 色相行波)\n";
             sys_write(fd, m, sizeof(m) - 1);
         } else if (mode == 4) {
             static const char m[] = "模式 4: 全频律动 (18 频段连续色谱与峰值动力学)\n";
@@ -1688,8 +1688,8 @@ void main_loop(long argc, char **argv) {
 
         } else if (current_mode == 2) {
             /* ===========================================================
-             * 模式 2: 重低音大动态立体声律动 (动态色温 + 峰值悬停)
-             * 重低音控制灯条延伸展翼长度 (从顶部 0 向下延伸至 8 与 10)
+             * 模式 2: 低音怒火 (前置爆发立体声律动: 动态色温 + 峰值悬停)
+             * 重低音控制灯条延伸展翼长度 (从正前方 8 与 9 向后延伸至 0 与 17)
              * 全频段能量质心自适应控制流光色温 (火红 → 翠绿 → 赛博青蓝)
              * =========================================================== */
             int bass_avg_l = (level_l[0] * 2 + level_l[1]) / 3;
@@ -1731,20 +1731,25 @@ void main_loop(long argc, char **argv) {
                 active_color = active_palette.m2_mid_color;
             }
 
-            /* 渲染左翼 */
+            /* 渲染左翼 (从正前方 8 号向后延伸: 8 -> 7 -> 6 -> ... -> 0) */
+            current_colors[8] = active_color;
             for (int step = 1; step <= 8; step++) {
+                int idx = 8 - step;
+                if (idx < 0) idx += 18;
                 if (step <= spread_l) {
-                    current_colors[step] = active_color;
+                    current_colors[idx] = active_color;
                 } else if (step == peak_l && peak_l > spread_l && peak_l > 0) {
-                    current_colors[step] = active_palette.m2_peak_color;
+                    current_colors[idx] = active_palette.m2_peak_color;
                 } else {
-                    current_colors[step] = active_palette.m2_bg_color;
+                    current_colors[idx] = active_palette.m2_bg_color;
                 }
             }
 
-            /* 渲染右翼 */
+            /* 渲染右翼 (从正前方 9 号向后延伸: 9 -> 10 -> 11 -> ... -> 17) */
+            current_colors[9] = active_color;
             for (int step = 1; step <= 8; step++) {
-                int idx = 18 - step;
+                int idx = 9 + step;
+                if (idx >= 18) idx -= 18;
                 if (step <= spread_r) {
                     current_colors[idx] = active_color;
                 } else if (step == peak_r && peak_r > spread_r && peak_r > 0) {
@@ -1754,11 +1759,10 @@ void main_loop(long argc, char **argv) {
                 }
             }
 
-            current_colors[0] = active_color;
+            /* 背部汇合点 (0 号与 17 号) 满展爆发指示 */
             if (spread_l >= 8 && spread_r >= 8) {
-                current_colors[9] = active_palette.m2_peak_color;
-            } else {
-                current_colors[9] = active_palette.m2_bg_color;
+                current_colors[0]  = active_palette.m2_peak_color;
+                current_colors[17] = active_palette.m2_peak_color;
             }
 
         } else if (current_mode == 3) {

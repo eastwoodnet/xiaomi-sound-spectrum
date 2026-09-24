@@ -92,9 +92,9 @@ An ultra-low-latency music visualizer designed specifically for the **Xiaomi Xia
 
 | Mode | Name | Description |
 | :---: | :--- | :--- |
-| **Mode 1** | **Stereo 8-Band Equalizer** | • **Left Wing (LED 1~8)**: Maps 8 acoustic bands on the left channel from sub-bass to air (Red $\to$ Orange $\to$ Yellow $\to$ Green $\to$ Cyan $\to$ Blue $\to$ Purple)<br>• **Right Wing (LED 17~10)**: Symmetrical right-channel frequency mapping<br>• **Top (LED 0)**: Sub-bass kick impact beat drop<br>• **Bottom (LED 9)**: High-frequency transient shimmer |
-| **Mode 2** | **Full-Ring Bass Pulse** | • **Symmetrical Spread**: Bass pulse expands downward from LED 0<br>• **Dynamic Spectral Centroid**: Shifts color temperature based on audio energy (Fiery red for bass-heavy, electric blue for highs, emerald green for vocal melodies)<br>• **DAW Peak-Hold**: Top peak indicators hover for ~170ms before smooth decay |
-| **Mode 3** | **Rainbow Lava Wave** | • **HSV Phase Shift Wave**: Partial differential phase-coupling propagation, liquid aurora-like flow<br>• **Multi-Band Modulation**: Bass drives continuous rotation, mid-frequencies modulate saturation, highs trigger subtle shimmer sparkles<br>• **Calm & Healing**: Perfect for acoustic, ambient, and jazz with zero eye strain |
+| **Mode 1** | **Angel Wings** | • **Left Wing (LED 1~8)**: Maps 8 acoustic bands on the left channel from sub-bass to air (Red $\to$ Orange $\to$ Yellow $\to$ Green $\to$ Cyan $\to$ Blue $\to$ Purple)<br>• **Right Wing (LED 17~10)**: Symmetrical right-channel frequency mapping<br>• **Top (LED 0)**: Sub-bass kick impact beat drop<br>• **Bottom (LED 9)**: High-frequency transient shimmer |
+| **Mode 2** | **Bass Wrath** | • **Front-Erupting Symmetrical Wings**: Bass pulse erupts from front LEDs 8 & 9 and spreads backwards to rear LEDs 0 & 17<br>• **Dynamic Spectral Centroid**: Shifts color temperature based on audio energy (Fiery red for bass-heavy, electric blue for highs, emerald green for vocal melodies)<br>• **DAW Peak-Hold**: Flank peak indicators hover for ~170ms before smooth decay |
+| **Mode 3** | **Flowing Lava** | • **HSV Phase Shift Wave**: Partial differential phase-coupling propagation, liquid aurora-like flow<br>• **Multi-Band Modulation**: Bass drives continuous rotation, mid-frequencies modulate saturation, highs trigger subtle shimmer sparkles<br>• **Calm & Healing**: Perfect for acoustic, ambient, and jazz with zero eye strain |
 | **Mode 4** | **Full-Spectrum Dynamics** | • **18-Band Chromatic Spectrum**: 1/3-octave log distribution (55Hz~20kHz) covering all 18 LEDs<br>• **Peak Nonlinear Dynamics**: Threshold noise gate + quadratic power expansion, smooth ambient baseline with explosive peak bloom<br>• **90° CCW Acoustic Alignment**: High-energy dynamic vocal range perfectly aligned with the front LEDs |
 | **Mode 5** *(Speed)* | **Speed Light Wheel** | • **JBL Partybox Flywheel Dynamics**: Smooth baseline counter-clockwise cruise rotation while playing<br>• **Sub-Bass & Kick Impulse Boost**: Explosive rotational acceleration on heavy bass hits, smoothly coasting down with flywheel rotational inertia<br>• **Sub-LED Spatial Anti-Aliasing**: 18,000-unit continuous interpolation + quadratic feathered comet tail, silky smooth with zero discrete LED stepping<br>• **Chromatic Morphing & Peak Core**: Smoothly shifting spectrum during spin, with pure white incandescent core flash on bass drops |
 
@@ -110,7 +110,7 @@ Full support for Home Assistant **MQTT Discovery**, automatically discovering en
 
 | Entity Type | Entity ID | Function |
 | :--- | :--- | :--- |
-| **Select** | `select.xiaomi_sound_l06a_led_mode` | Dropdown selector: `自动轮换` (Auto), `模式 1`, `模式 2`, `模式 3`, `模式 4`, `模式 5: 极速光轮`, `关闭律动 (恢复官方)` |
+| **Select** | `select.xiaomi_sound_l06a_led_mode` | Dropdown selector: `自动轮换` (Auto), `模式 1: 天使之翼`, `模式 2: 低音怒火`, `模式 3: 流动熔岩`, `模式 4: 全频律动`, `模式 5: 极速光轮`, `关闭律动 (恢复官方)` |
 | **Select** | `select.xiaomi_sound_l06a_led_theme` | Dropdown theme selector: `🌈 经典彩虹`, `🌆 赛博朋克`, `🌊 深海冰蓝`, `🔥 炽热烈焰`, `🌌 极光秘境`, `🎨 自定义调色` |
 | **Switch** | `switch.xiaomi_sound_l06a_visualizer_switch` | Master visualizer switch: `ON` / `OFF` |
 | **Sensor** | `sensor.xiaomi_sound_l06a_current_mode` | Real-time active sub-mode (e.g., `模式 5: 极速光轮`) or `待机 (官方交互)` |
