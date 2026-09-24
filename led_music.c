@@ -703,11 +703,11 @@ static void load_palette_config(void) {
             } else if (str_equals(key, "MODE2_BG_COLOR")) {
                 uint32_t c = parse_hex_color(val, 1);
                 if (c != 0) active_palette.m2_bg_color = c;
-            } else if (str_equals(key, "MODE3_HUE_MIN")) {
+            } else if (str_equals(key, "MODE3_HUE_MIN") || str_equals(key, "MODE5_HUE_MIN")) {
                 int hv = 0; const char *sp = val;
                 while (*sp >= '0' && *sp <= '9') { hv = hv * 10 + (*sp - '0'); sp++; }
                 active_palette.m3_hue_min = hv;
-            } else if (str_equals(key, "MODE3_HUE_MAX")) {
+            } else if (str_equals(key, "MODE3_HUE_MAX") || str_equals(key, "MODE5_HUE_MAX")) {
                 int hv = 0; const char *sp = val;
                 while (*sp >= '0' && *sp <= '9') { hv = hv * 10 + (*sp - '0'); sp++; }
                 active_palette.m3_hue_max = hv;
@@ -1143,6 +1143,159 @@ static void render_spectrum(const int *left_mags, const int *right_mags) {
     }
 }
 
+/* ================================================================
+ * 模式 5: 极速光轮 (JBL 旋风飞轮旋转律动 + 空间亚像素连续平滑插值)
+ *
+ * 核心声学与物理渲染机制:
+ * 1. 惯性飞轮角动力学模型 (Flywheel Rotational Inertia):
+ *    - 巡航基准角速度 (Idle Cruise): 音乐播放时维持顺畅逆时针旋转 (~5.5秒/周)。
+ *    - 瞬态低音角加速度冲量 (Bass & Kick Impulse): 捕捉重低音瞬态能量突变，
+ *      瞬间爆发角加速度，最大转速可飙升至 ~0.7秒/周。
+ *    - 机械惯性阻尼滑行 (Inertia Slew Decay): 鼓点结束后像带质量的飞轮一般
+ *      平滑滑行减速，自然优雅回退到巡航基速。
+ * 2. 空间亚像素连续羽化 (Sub-LED Spatial Anti-Aliasing):
+ *    - 虚拟角度分辨率高达 18,000 单位 (单颗 LED 划分为 1,000 个微步)。
+ *    - 彗星前鼻 (Nose 1.4 颗灯宽) 与拖尾长翼 (Tail 6~10.5 颗灯宽) 采用二次方连续羽化窗，
+ *      彻底消除 18 颗离散 LED 的跳格感，配合 AW20054 实现丝般柔滑漫步。
+ * 3. 动态 RGB 全彩色谱漫游与主题色温适配:
+ *    - 色相角沿彗星尾翼形成连续光谱渐变，并随时间与节拍全周漂移。
+ *    - 完全遵循用户当前选定的 palettes.conf 主题 (经典彩虹 / 极光 / 烈焰 / 赛博朋克 / 深海冰蓝)。
+ * 4. 鼓心极光白炽瞬态高光:
+ *    - 强重低音 (>65) 命中且处于彗星光核中心时，瞬间注入白炽高光冲击。
+ * ================================================================ */
+
+static int wheel_pos = 0;          /* 虚拟光斑角位置: 0 ~ 17999 (对应 18.000 颗灯珠) */
+static int wheel_speed = 40;        /* 当前角速度: 40 ~ 1200 步长/帧 */
+static int wheel_hue = 0;          /* 全局色相演化角: 0 ~ 3599 (0.1 度分辨率) */
+static int wheel_prev_bass = 0;    /* 上一帧低音能量，用于检测 Kick 鼓点瞬态一阶差分 */
+static int wheel_inited = 0;
+
+static void render_rotary_wheel(const int *level_l, const int *level_r) {
+    if (!wheel_inited) {
+        wheel_pos = 0;
+        wheel_speed = 40;
+        wheel_hue = 0;
+        wheel_prev_bass = 0;
+        wheel_inited = 1;
+    }
+
+    /* 1. 提取低音频段能量 (Band 0 超低音 55Hz + Band 1 鼓点 77Hz + Band 2 瞬态冲量 110Hz) */
+    int bass_now = (level_l[0] * 3 + level_l[1] * 3 + level_l[2] * 2 +
+                    level_r[0] * 3 + level_r[1] * 3 + level_r[2] * 2) / 16;
+    if (bass_now > 100) bass_now = 100;
+
+    /* 2. 捕捉 Kick 鼓点正向突变瞬态冲量 (Attack Impulse) */
+    int kick_impulse = 0;
+    if (bass_now > wheel_prev_bass) {
+        kick_impulse = (bass_now - wheel_prev_bass) * 16;
+    }
+    wheel_prev_bass = bass_now;
+
+    /* 3. 飞轮角动力学速度计算:
+     * - 极慢初始巡航: 40 步长/帧 (23.44 FPS 下约 19.2 秒优雅自旋一整圈)
+     * - 爆发加速度: 低音与鼓点突变可瞬时将速度拉升至 800~1200 步长/帧 (提升 20~30 倍动态反差)
+     */
+    const int IDLE_SPEED = 40;
+    int target_speed = IDLE_SPEED + (bass_now * 9) + kick_impulse;
+    if (target_speed > 1200) target_speed = 1200;
+
+    if (target_speed > wheel_speed) {
+        /* 敏锐加速 (Attack 80%): 鼓点重击瞬间极速响应 */
+        wheel_speed = (wheel_speed * 20 + target_speed * 80) / 100;
+    } else {
+        /* 惯性飞轮衰减 (Decay 90%): 鼓点过后机械阻尼柔和减速滑行回退 */
+        wheel_speed = (wheel_speed * 90 + IDLE_SPEED * 10) / 100;
+    }
+    if (wheel_speed < IDLE_SPEED) wheel_speed = IDLE_SPEED;
+
+    /* 逆时针角位移递减 (以用户正视音箱视角为准: 逆时针自旋) */
+    wheel_pos = (wheel_pos - wheel_speed + 18000) % 18000;
+
+    /* 4. 全局色相演变 (静默慢变，鼓点爆发时色相加速漫游) */
+    wheel_hue = (wheel_hue + 8 + bass_now / 6) % 3600;
+
+    /* 5. 空间彗星流光参数:
+     * - 前鼻羽化: 750 (0.75 颗灯宽，保持头部清爽凌厉)
+     * - 尾翼羽化: 4600 ~ 6800 (4.6 ~ 6.8 颗灯宽)，其余 11~13 颗灯全灭 (纯黑黑障区)
+     * - 尾部亮度强衰减: 三次方立方衰减模型，呈现出头部极亮、尾部迅速飘散收窄的彗星尾巴感
+     */
+    const int NOSE_LEN = 750;
+    int tail_len = 4600 + (bass_now * 22);
+    if (tail_len > 6800) tail_len = 6800;
+
+    /* 光核亮度 (170 ~ 255) */
+    int head_v = 170 + (bass_now * 85) / 100;
+    if (head_v > 255) head_v = 255;
+
+    /* 6. 遍历 18 颗物理 LED 进行亚像素空间能量映射 */
+    for (int i = 0; i < 18; i++) {
+        int led_pos = i * 1000;
+
+        /* 计算环形最短前向与后向角距离 (逆时针运动体系: 前进方向为角距离减少) */
+        int dist_ahead  = (wheel_pos - led_pos + 18000) % 18000;
+        int dist_behind = (led_pos - wheel_pos + 18000) % 18000;
+
+        int factor = 0;
+        int raw_hue = wheel_hue;
+
+        if (dist_ahead <= NOSE_LEN) {
+            /* 彗星前鼻羽化区 (柔和前沿，消除步进硬边) */
+            int u = ((NOSE_LEN - dist_ahead) * 1000) / NOSE_LEN;
+            factor = (u * u) / 1000; /* 二次方平滑羽化 */
+            raw_hue = wheel_hue;
+        } else if (dist_behind <= tail_len) {
+            /* 彗星拖尾衰减区 (三次方强衰减，打造清晰灵动的彗星长尾) */
+            int u = ((tail_len - dist_behind) * 1000) / tail_len;
+            factor = ((long)u * u * u) / 1000000;
+
+            /* 尾翼色彩渐变: 沿彗星拖尾形成动态色相渐变流光 (尾尖最大偏转 45 度) */
+            int hue_shift = ((1000 - u) * 450) / 1000;
+            raw_hue = (wheel_hue - hue_shift + 3600) % 3600;
+        } else {
+            factor = 0;
+            raw_hue = wheel_hue;
+        }
+
+        /* 尾部完全熄灭区: 彗星之外或能量极低点完全黑屏，杜绝全圈常亮 */
+        if (factor <= 2) {
+            current_colors[i] = C_BLACK;
+            continue;
+        }
+
+        /* 调色板主题色相映射 (将全周漫游色相与尾翼渐变精准映射到主题设定的色相区间内) */
+        int cur_hue = raw_hue;
+        if (active_palette.m3_hue_min != 0 || active_palette.m3_hue_max != 3600) {
+            int span = active_palette.m3_hue_max - active_palette.m3_hue_min;
+            if (span > 0 && span < 3600) {
+                cur_hue = active_palette.m3_hue_min + (raw_hue * span) / 3600;
+            }
+        }
+
+        /* 亮度计算: 峰值亮度 * 三次方衰减系数 (尾部迅速由亮变暗) */
+        int v = (head_v * factor) / 1000;
+
+        /* 立体声微妙动感: 仅在点亮区域施加轻微左右侧重微调 */
+        if (i >= 1 && i <= 8) {
+            v += ((level_l[0] - level_r[0]) * factor) / 3000;
+        } else if (i >= 10 && i <= 17) {
+            v += ((level_r[0] - level_l[0]) * factor) / 3000;
+        }
+        if (v < 0) v = 0;
+        if (v > 255) v = 255;
+
+        uint32_t col = hsv_to_bgr(cur_hue / 10, 245, v);
+
+        /* 重低音打击高光注入 (Kick Drum White Peak Core): 光斑中心在低音冲击时注入纯白光芒 */
+        if (bass_now > 60 && factor > 750) {
+            int white_mix = ((bass_now - 60) * (factor - 750)) / 50;
+            if (white_mix > 85) white_mix = 85;
+            col = blend_color(col, C_WHITE, white_mix);
+        }
+
+        current_colors[i] = col;
+    }
+}
+
 static void log_mode(int mode) {
     int fd = sys_openat(AT_FDCWD, PATH_MODE_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
@@ -1155,8 +1308,11 @@ static void log_mode(int mode) {
         } else if (mode == 3) {
             static const char m[] = "模式 3: 彩虹熔岩流动 (HSV 色相行波)\n";
             sys_write(fd, m, sizeof(m) - 1);
-        } else {
+        } else if (mode == 4) {
             static const char m[] = "模式 4: 全频律动 (18 频段连续色谱与峰值动力学)\n";
+            sys_write(fd, m, sizeof(m) - 1);
+        } else {
+            static const char m[] = "模式 5: 极速光轮 (JBL 旋风飞轮与亚像素平滑流动)\n";
             sys_write(fd, m, sizeof(m) - 1);
         }
         sys_close(fd);
@@ -1236,6 +1392,7 @@ void main_loop(long argc, char **argv) {
         else if (argv[1][0] == '2') { current_mode = 2; auto_cycle = 0; }
         else if (argv[1][0] == '3') { current_mode = 3; auto_cycle = 0; }
         else if (argv[1][0] == '4') { current_mode = 4; auto_cycle = 0; }
+        else if (argv[1][0] == '5') { current_mode = 5; auto_cycle = 0; }
         else if (argv[1][0] == 'a') { auto_cycle = 1; }
     }
 
@@ -1473,7 +1630,7 @@ void main_loop(long argc, char **argv) {
             mode_frame_counter++;
             if (mode_frame_counter >= 1400) { /* ~60秒轮换 */
                 mode_frame_counter = 0;
-                current_mode = (current_mode >= 4) ? 1 : current_mode + 1;
+                current_mode = (current_mode >= 5) ? 1 : current_mode + 1;
                 log_mode(current_mode);
             }
         }
@@ -1611,11 +1768,17 @@ void main_loop(long argc, char **argv) {
              * =========================================================== */
             render_lava(level_l, level_r);
 
-        } else {
+        } else if (current_mode == 4) {
             /* ===========================================================
              * 模式 4: 18 频段连续色谱 (峰值非线性动力学)
              * =========================================================== */
             render_spectrum(left_mags, right_mags);
+
+        } else {
+            /* ===========================================================
+             * 模式 5: 极速光轮 (JBL 旋风飞轮与亚像素平滑流动)
+             * =========================================================== */
+            render_rotary_wheel(level_l, level_r);
         }
 
         /* 提交非对称平滑阻尼 (Attack 75% 敏锐, Decay 38% 柔退) */

@@ -73,7 +73,7 @@ send_ha_discovery() {
     
     # 1. 注册 Select 实体: 律动模式选择器
     local disc_select="homeassistant/select/xiaomi_sound_l06a/led_mode/config"
-    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound Light","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-release"}}'
+    local payload_select='{"name":"声光律动模式","unique_id":"xiaomi_sound_l06a_led_mode","command_topic":"xiaomi_sound/led/set","state_topic":"xiaomi_sound/led/state","availability_topic":"xiaomi_sound/led/availability","payload_available":"online","payload_not_available":"offline","icon":"mdi:music-note-outline","options":["自动轮换","模式 1: 双翼声学均衡器","模式 2: 重低音大动态立体声律动","模式 3: 彩虹熔岩流动","模式 4: 全频律动","模式 5: 极速光轮","关闭律动 (恢复官方)"],"device":{"identifiers":["xiaomi_sound_l06a"],"name":"Xiaomi Sound Light","model":"L06A","manufacturer":"Xiaomi","sw_version":"v1.1-release"}}'
     mqtt_pub -t "$disc_select" -m "$payload_select" -r
 
     # 2. 注册 Switch 实体: 律动总开关
@@ -188,6 +188,11 @@ handle_mode_command() {
             switch_mode_action "4"
             report_state "模式 4: 全频律动" "ON" "模式 4: 全频律动"
             ;;
+        "5"|*"模式 5"*|*"极速光轮"*)
+            echo "5" > /data/led_mode
+            switch_mode_action "5"
+            report_state "模式 5: 极速光轮" "ON" "模式 5: 极速光轮"
+            ;;
         "auto"|*"自动轮换"*)
             rm -f /data/led_mode
             switch_mode_action "auto"
@@ -216,6 +221,7 @@ mqtt_worker() {
                     2) cur_name="模式 2: 重低音大动态立体声律动" ;;
                     3) cur_name="模式 3: 彩虹熔岩流动" ;;
                     4) cur_name="模式 4: 全频律动" ;;
+                    5) cur_name="模式 5: 极速光轮" ;;
                     off) cur_name="关闭律动 (恢复官方)"; pwr_state="OFF"; cur_active="已关闭" ;;
                 esac
             fi
@@ -465,6 +471,7 @@ while true; do
                     *"模式 2"*) cur_disp="模式 2: 重低音大动态立体声律动" ;;
                     *"模式 3"*) cur_disp="模式 3: 彩虹熔岩流动" ;;
                     *"模式 4"*) cur_disp="模式 4: 全频律动" ;;
+                    *"模式 5"*|*"极速光轮"*) cur_disp="模式 5: 极速光轮" ;;
                     *) cur_disp="$vmode_now" ;;
                 esac
                 [ -n "$cur_disp" ] && mqtt_pub -t "xiaomi_sound/led/current_mode" -m "$cur_disp" -r
