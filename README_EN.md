@@ -9,7 +9,8 @@ An ultra-low-latency music visualizer designed specifically for the **Xiaomi Xia
 > 🎬 **Demo Video**: [Watch the live demonstration on YouTube](https://www.youtube.com/shorts/diHwyLa1s8Q)
 
 > ⚠️ **Compatibility Notice**:  
-> Tested exclusively on **Xiaomi Sound (L06A)**. Other models (e.g., Xiaomi Sound Pro, Xiaoai Pro, Redmi Touch Display) feature different audio routing and LED drivers; compatibility is not guaranteed.
+> Tested exclusively on **Xiaomi Sound (L06A)**. Other models (e.g., Xiaomi Sound Pro, Xiaoai Pro, Redmi Touch Display) feature different audio routing and LED drivers; compatibility is not guaranteed.  
+> Also verified on the **Xiaoai Speaker Pro (LX06, firmware 1.88.206)**, whose LED driver (AW20054, 18 LEDs) and audio loopback (`hw:0,2`, TDM-C) match the L06A: native and Bluetooth (A2DP) takeover/restore were both tested. Untested models remain at your own risk.
 
 > 🔑 **Prerequisite**:  
 > Requires SSH root access on the speaker. Refer to the community unlock guide: [duhow/xiaoai-patch](https://github.com/duhow/xiaoai-patch/blob/master/research/lx06/install.md).
@@ -77,7 +78,7 @@ An ultra-low-latency music visualizer designed specifically for the **Xiaomi Xia
 
 ### 4. Smart Dual-Mode Companion Daemon
 - Background daemon (`led_guard.sh`) queries playback status every 3 seconds via the native system `ubus` IPC. During `sleep`, CPU consumption is strictly 0.00%.
-- **Automatic Activation**: Starts the visualizer when music playback (voice streaming, DLNA, Bluetooth) begins.
+- **Automatic Activation**: Starts the visualizer when music playback begins (voice streaming / DLNA via `mediaplayer` status, Bluetooth via `bluealsa-aplay` activity).
 - **Graceful Exit Ceremony**: Plays a smooth transition animation when playback stops, then hands control back to the official `ledserver`.
 - **Track-Switching Protection**: Rapidly aborts exit animations if a new song starts playing within the buffer window.
 
@@ -272,6 +273,30 @@ When logged into the speaker via SSH:
 | Check currently saved visualizer mode | `cat /data/led_mode` |
 
 ---
+
+## 📶 Bluetooth (A2DP) Playback Detection
+
+Bluetooth audio is written **straight to ALSA by `bluealsa-aplay` and never passes through the `mediaplayer` service**, so `ubus call mediaplayer player_get_play_status` cannot report it: while a Bluetooth stream is playing, that call may still return the paused value left over from an earlier native session (`status=2`, `position` frozen), which makes the daemon believe nothing is playing.
+
+`led_guard.sh` therefore adds a second detector next to the `ubus` check: each poll samples the `utime + stime` of `bluealsa-aplay` (`/proc/<pid>/stat`) and treats a growth of ≥2 ticks inside a window of ≥2 seconds as active Bluetooth playback. Once the stream stops the CPU time stops growing, and the daemon performs the usual exit animation and restores the official LED service.
+
+The thresholds sit at the top of `led_guard.sh` and can be tuned per device:
+
+```sh
+BT_MIN_TICKS=2      # minimum CPU tick growth inside the sampling window
+BT_MIN_WINDOW=2     # minimum sampling window in seconds
+```
+
+When `bluealsa-aplay` is absent or no Bluetooth source is connected, the detector stays inactive and behaviour is unchanged.
+
+### Hardware Verification
+
+| Device | Firmware | Verified |
+| :--- | :--- | :--- |
+| Xiaomi Sound (L06A) | — | original upstream verification |
+| Xiaoai Speaker Pro (LX06) | 1.88.206 | native takeover/restore (`mediaplayer` path shared by HTTP / DLNA / voice streaming), Bluetooth (A2DP) takeover/restore, mode locking and boot autostart, handover with the official `ledserver` |
+
+LX06 and L06A share the same community patched firmware (the `lx06.tar` from [duhow/xiaoai-patch](https://github.com/duhow/xiaoai-patch/blob/master/research/lx06/install.md) supports both).
 
 ## 🛠️ Hardware Technical Notes
 
