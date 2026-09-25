@@ -3,7 +3,8 @@
 # 小米 Sound (L06A) 智能声光律动守护服务 (Smart Music Companion Daemon)
 #
 # 功能说明:
-#   1. 每 3 秒通过 ubus 检测音箱当前是否有音乐在播放 (DLNA / 语音点播 / 手机推送)。
+#   1. 每 3 秒通过 ubus 检测音箱当前是否有音乐在播放 (DLNA / 语音点播 / 手机推送)，
+#      并通过 bluealsa-aplay 的 CPU 活动量检测蓝牙 (A2DP) 播放。
 #   2. 检测到放歌 (PLAYING) 时:
 #      - 优雅停止官方 ledserver，释放 LED 控制权；
 #      - 自动拉起原生 1024 点定点 FFT 音乐律动引擎 (led_music)。
@@ -160,7 +161,7 @@ switch_mode_action() {
     if is_music_running; then
         killall -9 led_music 2>/dev/null
         start-stop-daemon -S -b -m -p /tmp/led_music.pid -x "$MUSIC_BIN" -- "$target_mode"
-    elif [ "$(get_play_status)" = "1" ]; then
+    elif is_playing; then
         start_music_visualizer
     fi
 }
@@ -290,6 +291,55 @@ get_play_status() {
     echo "${st:-0}"
 }
 
+# ---------------- 蓝牙播放检测 (bluealsa-aplay) ----------------
+# 蓝牙音频由 bluealsa-aplay 直接写入 ALSA 输出，不经过 mediaplayer 服务，
+# 因此 ubus 播放状态无法反映蓝牙播放；这里用其 CPU 时间增量判断是否真的在解码播放。
+BT_PROC_NAME="bluealsa-aplay"
+BT_STATE_FILE="/tmp/led_guard_bt.state"
+BT_MIN_TICKS=2          # 判定阈值: 采样窗口内至少 2 个 CPU tick
+BT_MIN_WINDOW=2         # 采样窗口至少 2 秒
+BT_PLAYING=0
+
+bt_proc_pid() {
+    ps 2>/dev/null | grep "$BT_PROC_NAME" | grep -v grep | awk '{print $1}' | head -n 1
+}
+
+bt_sample() {
+    local p t now prev_p prev_t prev_now
+    p=$(bt_proc_pid)
+    t=""
+    [ -n "$p" ] && [ -r "/proc/$p/stat" ] && t=$(awk '{print $14+$15}' "/proc/$p/stat" 2>/dev/null)
+    now=$(date +%s 2>/dev/null)
+    if [ -z "$p" ] || [ -z "$t" ] || [ -z "$now" ]; then
+        BT_PLAYING=0
+        rm -f "$BT_STATE_FILE"
+        return 1
+    fi
+    prev_p=""; prev_t=""; prev_now=""
+    [ -f "$BT_STATE_FILE" ] && read prev_p prev_t prev_now < "$BT_STATE_FILE" 2>/dev/null
+    if [ -n "$prev_t" ] && [ "$prev_p" = "$p" ] && [ -n "$prev_now" ]; then
+        if [ $((now - prev_now)) -ge "$BT_MIN_WINDOW" ]; then
+            if [ $((t - prev_t)) -ge "$BT_MIN_TICKS" ]; then
+                BT_PLAYING=1
+            else
+                BT_PLAYING=0
+            fi
+            echo "$p $t $now" > "$BT_STATE_FILE"
+        fi
+    else
+        # 首次采样或 bluealsa-aplay 重启：只建立基线
+        echo "$p $t $now" > "$BT_STATE_FILE"
+        BT_PLAYING=0
+    fi
+    [ "$BT_PLAYING" = "1" ]
+}
+
+# 综合播放判断：原生/云端/DLNA 播放 (mediaplayer status=1) 或蓝牙播放
+is_playing() {
+    [ "$(get_play_status)" = "1" ] && return 0
+    [ "$BT_PLAYING" = "1" ]
+}
+
 start_music_visualizer() {
     # 如果用户通过 MQTT 设置了关闭律动 (off)，则不接管 LED
     if [ -f /data/led_mode ] && [ "$(cat /data/led_mode 2>/dev/null | tr -d ' \n\r')" = "off" ]; then
@@ -343,7 +393,7 @@ play_exit_animation() {
         echo "0 $COLOR_RED" > "$LED_RGB" 2>/dev/null
         sleep 0.25
         for step in 1 2 3 4 5 6 7 8; do
-            if [ "$(get_play_status)" = "1" ]; then
+            if is_playing; then
                 return 1   # 切歌快速打断，恢复播放
             fi
             l=$((0 + step))
@@ -365,7 +415,7 @@ play_exit_animation() {
         echo "9 0" > "$LED_RGB" 2>/dev/null
         sleep 0.2
         for step in 1 2 3 4 5 6 7 8; do
-            if [ "$(get_play_status)" = "1" ]; then
+            if is_playing; then
                 return 1   # 切歌快速打断，恢复播放
             fi
             l=$((9 - step))
@@ -431,9 +481,9 @@ trap cleanup INT TERM EXIT HUP
 # 启动初始化: 拉起 MQTT 守护后台
 start_mqtt_daemon
 
-# 检查当前播放状态
-current_st=$(get_play_status)
-if [ "$current_st" = "1" ]; then
+# 检查当前播放状态（原生/云端播放 或 蓝牙播放）
+bt_sample
+if is_playing; then
     start_music_visualizer
 else
     if is_music_running; then
@@ -458,9 +508,10 @@ fi
 last_vmode=""
 
 while true; do
+    bt_sample            # 每轮采样一次蓝牙播放活动
     status=$(get_play_status)
 
-    if [ "$status" = "1" ]; then
+    if [ "$status" = "1" ] || [ "$BT_PLAYING" = "1" ]; then
         # 正在播放音乐
         if ! is_music_running; then
             start_music_visualizer

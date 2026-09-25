@@ -9,7 +9,8 @@
 > 🎬 **实机实测律动效果演示视频**：[点击前往 YouTube 查看实机演示](https://www.youtube.com/shorts/diHwyLa1s8Q)
 
 > ⚠️ **设备兼容性说明**：  
-> 本项目的算法、声卡通道、I2C 控制（AW20054）及系统接口目前**仅在「小米 Sound（型号：L06A）」音箱上完成验证**。其他型号因内部声卡路由及硬件布局不同，不保证可直接运行。
+> 本项目的算法、声卡通道、I2C 控制（AW20054）及系统接口目前**仅在「小米 Sound（型号：L06A）」音箱上完成验证**。其他型号因内部声卡路由及硬件布局不同，不保证可直接运行。  
+> 目前另在**小米小爱音箱 Pro（型号：LX06，固件 1.88.206）**上完成实机验证：其 LED 驱动（AW20054，18 颗）与音频回环（`hw:0,2`，TDM-C）与 L06A 一致，原生播放与蓝牙 (A2DP) 播放的接管与还原均已验证；仍未验证的型号请自行评估。
 
 > 🔑 **前置条件**：  
 > 音箱需开启 SSH root 权限。解锁方式可参考社区教程：[duhow/xiaoai-patch](https://github.com/duhow/xiaoai-patch/blob/master/research/lx06/install.md)。
@@ -82,7 +83,7 @@
 
 ### 4. 智能双模生命周期守护
 - 后台守护脚本（`led_guard.sh`）以 3 秒间隔通过系统 `ubus` 查询播放状态，在 `sleep` 挂起期间 CPU 占用为 0.00%。
-- **放歌自动唤醒**：检测到音乐播放（语音点播 / DLNA / 蓝牙）时，自动暂停官方灯光服务并启动律动引擎。
+- **放歌自动唤醒**：检测到音乐播放（语音点播 / DLNA 经 `mediaplayer` 状态，蓝牙经 `bluealsa-aplay` 活动量）时，自动暂停官方灯光服务并启动律动引擎。
 - **停播优雅退场**：音乐停止后自动执行过渡退场动画并切回官方 `ledserver`，闲置时完全黑屏，小爱唤醒光环随时待命。
 - **切歌防抖保护**：在退场动画执行期间切到下一首音乐时，毫秒级无缝打断退场并继续保持律动。
 
@@ -275,6 +276,30 @@ touch /tmp/reload_palette
 | 查看当前保存的律动模式 | `cat /data/led_mode` |
 
 ---
+
+## 📶 蓝牙 (A2DP) 播放检测
+
+蓝牙音频由 `bluealsa-aplay` **直接写入 ALSA 输出，不经过 `mediaplayer` 服务**，因此 `ubus call mediaplayer player_get_play_status` 无法反映蓝牙播放状态：连接蓝牙播放时，该接口可能仍停留在上一次原生播放留下的暂停值（`status=2`，`position` 不前进），导致守护进程认为没有音乐在播。
+
+`led_guard.sh` 因此在 `ubus` 判断之外增加了第二路检测：每轮轮询读取 `bluealsa-aplay` 的 `utime + stime`（`/proc/<pid>/stat`），若在 ≥2 秒的窗口内增长 ≥2 个 tick，即判定蓝牙正在播放；蓝牙停止后 CPU 时间不再增长，守护进程照常执行退场动画并恢复官方灯光服务。
+
+判定阈值位于 `led_guard.sh` 顶部，可按设备微调：
+
+```sh
+BT_MIN_TICKS=2      # 采样窗口内判定为播放所需的最小 CPU tick 增长
+BT_MIN_WINDOW=2     # 采样窗口的最小秒数
+```
+
+`bluealsa-aplay` 不存在或未接入蓝牙时，该检测自动失效，行为与原先一致。
+
+### 实机验证记录
+
+| 设备 | 固件 | 已验证内容 |
+| :--- | :--- | :--- |
+| 小米 Sound (L06A) | — | 上游原有验证范围 |
+| 小爱音箱 Pro (LX06) | 1.88.206 | 原生播放（`mediaplayer` 通道，HTTP / DLNA / 语音点播共用）接管与还原、蓝牙 (A2DP) 播放接管与还原、模式锁定与开机自启、与官方 `ledserver` 的交接 |
+
+LX06 与 L06A 使用同一套社区补丁固件（[duhow/xiaoai-patch](https://github.com/duhow/xiaoai-patch/blob/master/research/lx06/install.md) 的 `lx06.tar` 同时支持两者）。
 
 ## 🛠️ 硬件技术备忘
 
