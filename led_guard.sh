@@ -193,6 +193,11 @@ handle_mode_command() {
             switch_mode_action "5"
             report_state "模式 5: 极速光轮" "ON" "模式 5: 极速光轮"
             ;;
+        "6"|*"模式 6"*|*"警灯"*)
+            echo "6" > /data/led_mode
+            switch_mode_action "6"
+            report_state "" "ON" "彩蛋模式: 警灯风暴"
+            ;;
         "auto"|*"自动轮换"*)
             rm -f /data/led_mode
             switch_mode_action "auto"
@@ -222,6 +227,7 @@ mqtt_worker() {
                     3) cur_name="模式 3: 流动熔岩" ;;
                     4) cur_name="模式 4: 全频律动" ;;
                     5) cur_name="模式 5: 极速光轮" ;;
+                    6) cur_name=""; cur_active="彩蛋模式: 警灯风暴" ;;
                     off) cur_name="关闭律动 (恢复官方)"; pwr_state="OFF"; cur_active="已关闭" ;;
                 esac
             fi
@@ -472,6 +478,7 @@ while true; do
                     *"模式 3"*|*"流动熔岩"*|*"彩虹熔岩"*) cur_disp="模式 3: 流动熔岩" ;;
                     *"模式 4"*) cur_disp="模式 4: 全频律动" ;;
                     *"模式 5"*|*"极速光轮"*) cur_disp="模式 5: 极速光轮" ;;
+                    *"模式 6"*|*"警灯"*) cur_disp="彩蛋模式: 警灯风暴" ;;
                     *) cur_disp="$vmode_now" ;;
                 esac
                 [ -n "$cur_disp" ] && mqtt_pub -t "xiaomi_sound/led/current_mode" -m "$cur_disp" -r

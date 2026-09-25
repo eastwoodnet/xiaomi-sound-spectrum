@@ -1296,6 +1296,136 @@ static void render_rotary_wheel(const int *level_l, const int *level_r) {
     }
 }
 
+/* ================================================================
+ * 模式 6: 警灯风暴 (美式红蓝双色交替爆闪 Police Strobe)
+ *
+ * 几何布局:
+ * - 0 ~ 8 号 (9 颗): 恒定纯红 (RED: BGR 0x0000FF)
+ * - 9 ~ 17 号 (9 颗): 恒定纯蓝 (BLUE: BGR 0xFF0000)
+ * - 左右严格固定颜色，永不互换红蓝侧
+ *
+ * 动力学引擎:
+ * 1. 节拍驱动换侧 (Beat-driven Flip):
+ *    捕捉 Kick / Sub-Bass 重低音瞬态冲击 (Attack Impulse)，强鼓点卡点瞬间强制换侧。
+ * 2. 经典多联频闪 (Multi-Strobe Burst):
+ *    每侧触发时执行极速三连闪 (Pulse 1 -> Pulse 2 -> Pulse 3 -> 间歇)。
+ * 3. 音乐节奏与能量自适应速度 (Rhythm Tempo Scaling):
+ *    音乐节奏越激烈、能量越高，频闪周期越短 (从 14 帧压缩至 6 帧)，爆发更狂暴。
+ * 4. 强音白炽爆闪核心 (Strobe Tube White Flash):
+ *    当低音冲顶时，中心核心灯珠 (LED 4 红心 / LED 13 蓝心) 爆出纯白电弧光 (0xFFFFFF)。
+ * 5. 静音待机呼吸 (Ambient Glow):
+ *    无音频能量时转为微暗微光，防止刺眼。
+ * ================================================================ */
+static int police_side = 0;        /* 0: 红侧 (0-8), 1: 蓝侧 (9-17) */
+static int police_timer = 0;       /* 当前侧内的帧计数器 */
+static int police_prev_bass = 0;    /* 上一帧低音能量，用于检测 Kick 冲量 */
+static int police_beat_cd = 0;      /* 节拍翻转冷却计数，防止声学抖动 */
+static int police_inited = 0;
+
+static inline int get_police_strobe_state(int timer, int burst_len) {
+    if (burst_len <= 7) {
+        /* 高速高能模式: 双重强力爆闪 (Double-Flash, 2帧亮/1帧暗/2帧亮/暗, 保证每闪 ~85ms 充分视网膜积分) */
+        if (timer < 2) return 1;
+        if (timer == 2) return 0;
+        if (timer < 5) return 1;
+        return 0;
+    } else {
+        /* 常规/慢速模式: 三重战术爆闪 (Triple-Flash, 2帧亮/1帧暗/2帧亮/1帧暗/2帧亮/暗) */
+        if (timer < 2) return 1;
+        if (timer == 2) return 0;
+        if (timer < 5) return 1;
+        if (timer == 5) return 0;
+        if (timer < 8) return 1;
+        return 0;
+    }
+}
+
+static void render_police_strobe(const int *level_l, const int *level_r, int total_bass, int total_treble) {
+    if (!police_inited) {
+        police_side = 0;
+        police_timer = 0;
+        police_prev_bass = 0;
+        police_beat_cd = 0;
+        police_inited = 1;
+    }
+
+    /* 1. 提取当前音频动力学特征 */
+    int bass_now = (level_l[0] * 3 + level_l[1] * 2 + level_r[0] * 3 + level_r[1] * 2) / 10;
+    if (bass_now > 100) bass_now = 100;
+
+    int energy = (total_bass / 4 + total_treble / 6) / 2;
+    if (energy > 100) energy = 100;
+
+    /* 2. 检测重低音 Kick 瞬态冲量 (Attack Impulse) */
+    int kick_impulse = 0;
+    if (bass_now > police_prev_bass) {
+        kick_impulse = bass_now - police_prev_bass;
+    }
+    police_prev_bass = bass_now;
+
+    if (police_beat_cd > 0) police_beat_cd--;
+
+    /* 3. 节拍驱动换侧 (Beat-driven Flip):
+     * 当强鼓点突变击中时，强行切到对侧并立即触发新一轮爆闪
+     */
+    if (police_beat_cd == 0 && (kick_impulse >= 16 || (bass_now >= 68 && kick_impulse >= 8))) {
+        police_side = 1 - police_side;
+        police_timer = 0;
+        police_beat_cd = 5; /* 约 106ms 冷却 */
+    }
+
+    /* 4. 频闪速率自适应 (根据音乐能量自适应调整每轮周期)
+     * 高能电音/摇滚 (energy > 70): burst_len = 6 帧 (~128ms, 超高速狂暴频闪)
+     * 普通流行/舞曲 (energy 40~70): burst_len = 8~10 帧 (~170~213ms)
+     * 舒缓慢歌 (energy < 40): burst_len = 12 帧 (~256ms)
+     */
+    int burst_len = 12 - (energy * 6) / 100;
+    if (burst_len < 6) burst_len = 6;
+    if (burst_len > 14) burst_len = 14;
+
+    /* 推进当前侧计时器 */
+    police_timer++;
+    if (police_timer >= burst_len) {
+        police_timer = 0;
+        police_side = 1 - police_side; /* 自然轮换到对侧 */
+    }
+
+    /* 5. 警灯爆闪状态 */
+    int is_flash_on = get_police_strobe_state(police_timer, burst_len);
+
+    /* 6. 静音/待机保护: 若无音乐 (energy 极低)，关闭爆闪，进入极微暗光 (100% 纯正单色) */
+    if (energy < 4) {
+        for (int i = 0; i <= 8; i++) current_colors[i] = 0x000006;    /* 纯正微暗红 */
+        for (int i = 9; i <= 17; i++) current_colors[i] = 0x0C0000;   /* 纯正微暗蓝 (0绿0白) */
+        return;
+    }
+
+    /* 7. 纯正警灯色彩与动态亮度平衡:
+     * - 坚决剔除任何绿光与白光混合，保持 100% 纯正深邃皇家纯蓝 (0xFF0000 BGR) 与经典纯红 (0x0000FF BGR)
+     * - 光学视见对比平衡:
+     *   * 蓝端推至全幅 240~255 (释放纯蓝物理硬件极限)
+     *   * 红端控制在 130~165 (人眼对红光感度天然是蓝光的 4 倍，压低红端可避免强红光致盲，使纯蓝极为醒目鲜明)
+     */
+    int red_v = 130 + (energy * 35) / 100 + kick_impulse;
+    if (level_l[0] > level_r[0]) red_v += (level_l[0] - level_r[0]) / 3;
+    if (red_v > 165) red_v = 165;
+
+    int blue_v = 240 + (energy * 15) / 100;
+    if (level_r[0] > level_l[0]) blue_v += (level_r[0] - level_l[0]) / 3;
+    if (blue_v > 255) blue_v = 255;
+
+    /* 8. 填充物理 LED 颜色 (0-8 纯红，9-17 纯蓝，极致纯粹，零杂色，零发白偏绿) */
+    for (int i = 0; i < 18; i++) {
+        if (i <= 8) {
+            /* ---------------- 左半圈: 恒定纯红 ---------------- */
+            current_colors[i] = (police_side == 0 && is_flash_on) ? (uint32_t)red_v : C_BLACK;
+        } else {
+            /* ---------------- 右半圈: 恒定纯蓝 (全幅 255 纯蓝 0xBB0000) ---------------- */
+            current_colors[i] = (police_side == 1 && is_flash_on) ? ((uint32_t)blue_v << 16) : C_BLACK;
+        }
+    }
+}
+
 static void log_mode(int mode) {
     int fd = sys_openat(AT_FDCWD, PATH_MODE_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
@@ -1311,8 +1441,11 @@ static void log_mode(int mode) {
         } else if (mode == 4) {
             static const char m[] = "模式 4: 全频律动 (18 频段连续色谱与峰值动力学)\n";
             sys_write(fd, m, sizeof(m) - 1);
-        } else {
+        } else if (mode == 5) {
             static const char m[] = "模式 5: 极速光轮 (JBL 旋风飞轮与亚像素平滑流动)\n";
+            sys_write(fd, m, sizeof(m) - 1);
+        } else {
+            static const char m[] = "模式 6: 警灯风暴 (美式红蓝双色交替爆闪)\n";
             sys_write(fd, m, sizeof(m) - 1);
         }
         sys_close(fd);
@@ -1393,6 +1526,7 @@ void main_loop(long argc, char **argv) {
         else if (argv[1][0] == '3') { current_mode = 3; auto_cycle = 0; }
         else if (argv[1][0] == '4') { current_mode = 4; auto_cycle = 0; }
         else if (argv[1][0] == '5') { current_mode = 5; auto_cycle = 0; }
+        else if (argv[1][0] == '6') { current_mode = 6; auto_cycle = 0; }
         else if (argv[1][0] == 'a') { auto_cycle = 1; }
     }
 
@@ -1778,15 +1912,21 @@ void main_loop(long argc, char **argv) {
              * =========================================================== */
             render_spectrum(left_mags, right_mags);
 
-        } else {
+        } else if (current_mode == 5) {
             /* ===========================================================
              * 模式 5: 极速光轮 (JBL 旋风飞轮与亚像素平滑流动)
              * =========================================================== */
             render_rotary_wheel(level_l, level_r);
+
+        } else {
+            /* ===========================================================
+             * 模式 6: 警灯风暴 (美式红蓝双色交替爆闪)
+             * =========================================================== */
+            render_police_strobe(level_l, level_r, total_bass, total_treble);
         }
 
-        /* 提交非对称平滑阻尼 (Attack 75% 敏锐, Decay 38% 柔退) */
-        apply_smooth_damping(0);
+        /* 提交平滑阻尼: 模式 6 直通 100% 敏锐无延迟瞬态爆闪，模式 1-5 Attack 75% 敏锐, Decay 38% 柔退 */
+        apply_smooth_damping(current_mode == 6 ? 1 : 0);
 
         /* 提交差量 I2C 硬件写入 (Deadband >= 4) */
         flush_leds(fd_led, 0);
